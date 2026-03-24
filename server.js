@@ -16,6 +16,15 @@ app.get('/auth/facebook/callback', async (req, res) => {
   res.json({ status: 'Callback received', code });
 });
 
+// Generic auth callback endpoint
+app.get('/auth/callback', async (req, res) => {
+  const code = req.query.code;
+  console.log('Callback code:', code);
+
+  // Continue your token exchange logic here
+  res.send('Callback received');
+});
+
 // Get photos endpoint
 app.get('/photos', async (req, res) => {
   const { token } = req.query;
