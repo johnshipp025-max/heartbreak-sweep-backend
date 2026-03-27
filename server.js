@@ -80,8 +80,14 @@ app.get('/auth/callback', async (req, res) => {
 
     res.redirect(redirectUrl);
   } catch (err) {
-    console.error('OAuth error:', err.response?.data || err.message);
-    res.status(500).send('OAuth failed');
+    const oauthError = err.response?.data || { message: err.message };
+    console.error('OAuth error:', oauthError);
+    res.status(500).json({
+      error: 'OAuth failed',
+      details: oauthError,
+      hint: 'Check Facebook app settings and ensure FB_REDIRECT_URI exactly matches the login redirect URL.',
+      callback: process.env.FB_REDIRECT_URI,
+    });
   }
 });
 
