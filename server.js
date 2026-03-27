@@ -34,6 +34,15 @@ app.get('/auth/callback', async (req, res) => {
     return res.status(400).send('Missing code query parameter');
   }
 
+  const oauthEnv = ['FB_APP_ID', 'FB_APP_SECRET', 'FB_REDIRECT_URI'];
+  const missingOauthEnv = oauthEnv.filter((key) => !process.env[key]);
+  if (missingOauthEnv.length) {
+    return res.status(500).json({
+      error: 'OAuth is not configured on the server',
+      missing: missingOauthEnv,
+    });
+  }
+
   try {
     // 1. Exchange code for access token
     const tokenRes = await axios.get(
@@ -222,12 +231,13 @@ app.get('/', (req, res) => {
   });
 });
 
-// Environment validation on startup
-const requiredEnv = ['FB_APP_ID', 'FB_APP_SECRET', 'FB_REDIRECT_URI'];
-const missingEnv = requiredEnv.filter((key) => !process.env[key]);
-if (missingEnv.length) {
-  console.error(`Missing required env vars: ${missingEnv.join(', ')}`);
-  process.exit(1);
+// Facebook OAuth vars are validated in /auth/callback so the server can still boot for health checks.
+const requiredOauthEnv = ['FB_APP_ID', 'FB_APP_SECRET', 'FB_REDIRECT_URI'];
+const missingOauthEnv = requiredOauthEnv.filter((key) => !process.env[key]);
+if (missingOauthEnv.length) {
+  console.warn(
+    `Warning: Missing OAuth env vars: ${missingOauthEnv.join(', ')}. /auth/callback will return an error until these are set.`
+  );
 }
 
 // Optional: warn if AWS env vars missing (but don't hard-exit)
