@@ -30,6 +30,11 @@ app.get('/auth/callback', async (req, res) => {
   const code = req.query.code;
   console.log('Callback code:', code);
 
+  const envRedirect = process.env.FB_REDIRECT_URI || '';
+  const normalizedRedirect = envRedirect.trim().replace(/^"|"$/g, '');
+  const fallbackRedirect = `${req.protocol}://${req.get('host')}/auth/callback`;
+  const redirectUri = normalizedRedirect || fallbackRedirect;
+
   if (!code) {
     return res.status(400).send('Missing code query parameter');
   }
@@ -44,6 +49,17 @@ app.get('/auth/callback', async (req, res) => {
   }
 
   try {
+    // Validate redirect URI before using it in OAuth token exchange.
+    try {
+      new URL(redirectUri);
+    } catch {
+      return res.status(500).json({
+        error: 'OAuth is not configured on the server',
+        details: 'FB_REDIRECT_URI is not a valid absolute URL',
+        callback: redirectUri,
+      });
+    }
+
     // 1. Exchange code for access token
     const tokenRes = await axios.get(
       'https://graph.facebook.com/v18.0/oauth/access_token',
@@ -51,7 +67,7 @@ app.get('/auth/callback', async (req, res) => {
         params: {
           client_id: process.env.FB_APP_ID,
           client_secret: process.env.FB_APP_SECRET,
-          redirect_uri: process.env.FB_REDIRECT_URI,
+          redirect_uri: redirectUri,
           code,
         },
       }
@@ -86,7 +102,7 @@ app.get('/auth/callback', async (req, res) => {
       error: 'OAuth failed',
       details: oauthError,
       hint: 'Check Facebook app settings and ensure FB_REDIRECT_URI exactly matches the login redirect URL.',
-      callback: process.env.FB_REDIRECT_URI,
+      callback: redirectUri,
     });
   }
 });
