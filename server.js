@@ -105,6 +105,15 @@ app.get('/auth/callback', async (req, res) => {
   } catch (err) {
     const oauthError = err.response?.data || { message: err.message };
     console.error('OAuth error:', oauthError);
+
+    // If the code was already used (loop case), redirect frontend home so user can try again cleanly.
+    const fbCode = oauthError?.code;
+    const fbSubcode = oauthError?.error_subcode;
+    if (fbCode === 100 && fbSubcode === 36009) {
+      const frontendUrl = process.env.FRONTEND_URL || 'https://heartbreaksweeper.com';
+      return res.redirect(`${frontendUrl}?auth_error=code_used`);
+    }
+
     res.status(500).json({
       error: 'OAuth failed',
       details: oauthError,
