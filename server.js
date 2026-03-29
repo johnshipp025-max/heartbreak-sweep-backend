@@ -90,11 +90,18 @@ app.get('/auth/callback', async (req, res) => {
 
     // 4. Redirect back to frontend with user ID and token
     const frontendUrl = process.env.FRONTEND_URL || 'https://heartbreaksweeper.com';
-    const redirectUrl = `${frontendUrl}?user=${encodeURIComponent(
-      user.id
-    )}&token=${encodeURIComponent(accessToken)}`;
+    const redirectTarget = new URL(frontendUrl);
 
-    res.redirect(redirectUrl);
+    // Include common key variants so different frontend implementations can read the login result.
+    redirectTarget.searchParams.set('user', user.id);
+    redirectTarget.searchParams.set('userId', user.id);
+    redirectTarget.searchParams.set('id', user.id);
+
+    redirectTarget.searchParams.set('token', accessToken);
+    redirectTarget.searchParams.set('access_token', accessToken);
+    redirectTarget.searchParams.set('fbToken', accessToken);
+
+    res.redirect(redirectTarget.toString());
   } catch (err) {
     const oauthError = err.response?.data || { message: err.message };
     console.error('OAuth error:', oauthError);
