@@ -107,8 +107,9 @@ app.get('/auth/callback', async (req, res) => {
     console.error('OAuth error:', oauthError);
 
     // If the code was already used (loop case), redirect frontend home so user can try again cleanly.
-    const fbCode = oauthError?.code;
-    const fbSubcode = oauthError?.error_subcode;
+    const fbError = oauthError?.error || oauthError;
+    const fbCode = fbError?.code;
+    const fbSubcode = fbError?.error_subcode;
     if (fbCode === 100 && fbSubcode === 36009) {
       const frontendUrl = process.env.FRONTEND_URL || 'https://heartbreaksweeper.com';
       return res.redirect(`${frontendUrl}?auth_error=code_used`);
