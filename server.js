@@ -181,6 +181,18 @@ app.post('/analyze', async (req, res) => {
 
     const photos = Array.isArray(photosData.data) ? photosData.data : [];
     const matches = [];
+    let awsAuthError = null;
+
+    const isAwsAuthError = (err) => {
+      const message = String(err?.message || '').toLowerCase();
+      const code = String(err?.code || '').toLowerCase();
+      return (
+        message.includes('security token included in the request is invalid') ||
+        message.includes('the security token included in the request is invalid') ||
+        code === 'unrecognizedclientexception' ||
+        code === 'invalidsignatureexception'
+      );
+    };
 
     // 3. For each photo, compare faces using Rekognition
     for (const photo of photos) {
@@ -213,8 +225,20 @@ app.post('/analyze', async (req, res) => {
         }
       } catch (err) {
         console.error(`Rekognition error for photo ${photo.id}:`, err.message);
+        if (isAwsAuthError(err)) {
+          awsAuthError = err;
+          break;
+        }
         // continue with next photo
       }
+    }
+
+    if (awsAuthError) {
+      return res.status(500).json({
+        error: 'AWS Rekognition authentication failed',
+        details: awsAuthError.message,
+        fix: 'Update AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION in Render. If using temporary credentials, also set AWS_SESSION_TOKEN.',
+      });
     }
 
     // 4. Return matches in the format your frontend expects
