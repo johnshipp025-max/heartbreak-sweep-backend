@@ -194,6 +194,16 @@ app.post('/analyze', async (req, res) => {
       );
     };
 
+    const isAwsPermissionError = (err) => {
+      const message = String(err?.message || '').toLowerCase();
+      const code = String(err?.code || '').toLowerCase();
+      return (
+        code === 'accessdeniedexception' ||
+        message.includes('is not authorized to perform') ||
+        message.includes('identity-based policy allows no')
+      );
+    };
+
     // 3. For each photo, compare faces using Rekognition
     for (const photo of photos) {
       const bestImage = photo.images?.[0];
@@ -228,6 +238,13 @@ app.post('/analyze', async (req, res) => {
         if (isAwsAuthError(err)) {
           awsAuthError = err;
           break;
+        }
+        if (isAwsPermissionError(err)) {
+          return res.status(500).json({
+            error: 'AWS Rekognition permission denied',
+            details: err.message,
+            fix: 'Attach an IAM policy to this AWS user/role allowing rekognition:CompareFaces (and optionally rekognition:DetectFaces) on *.',
+          });
         }
         // continue with next photo
       }
