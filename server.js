@@ -7,7 +7,7 @@ const AWS = require('aws-sdk');
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '10mb' })); // allow base64 images
+app.use(express.json({ limit: '50mb' })); // allow multiple base64 images
 
 // AWS Rekognition setup
 AWS.config.update({
@@ -225,51 +225,63 @@ app.get('/photos', async (req, res) => {
   }
 });
 
-// 🔥 AI Analyze endpoint: compares refPhoto against user's Facebook photos
+// 🔥 AI Analyze endpoint: compares refPhoto(s) against user's Facebook photos
 app.post('/analyze', async (req, res) => {
-  const { token, refPhoto } = req.body;
+  const { token, refPhoto, refPhotos } = req.body;
 
-  if (!token || !refPhoto) {
-    return res.status(400).json({ error: 'Missing token or refPhoto in body' });
+  // Accept either a single refPhoto string or an array of refPhotos
+  const rawPhotos = Array.isArray(refPhotos) && refPhotos.length > 0
+    ? refPhotos
+    : refPhoto
+      ? [refPhoto]
+      : [];
+
+  if (!token || !rawPhotos.length) {
+    return res.status(400).json({ error: 'Missing token or reference photo(s) in body' });
   }
 
   try {
-    // 1. Convert refPhoto (data URL) to Buffer
-    const base64Data = refPhoto.split(',')[1];
-    if (!base64Data) {
-      return res.status(400).json({ error: 'Invalid refPhoto format' });
-    }
-    const refBuffer = Buffer.from(base64Data, 'base64');
-
-    // Rekognition max is 5 MB for inline Bytes
-    const refSizeMB = refBuffer.length / (1024 * 1024);
-    console.log(`Reference photo size: ${refSizeMB.toFixed(2)} MB`);
-    if (refSizeMB > 5) {
-      return res.status(400).json({
-        error: `Reference photo is too large (${refSizeMB.toFixed(1)} MB). Rekognition limit is 5 MB. Please upload a smaller or lower-resolution image.`,
-      });
-    }
-
-    // Pre-validate: make sure Rekognition can detect at least one face in the reference photo
-    try {
-      const detectRes = await rekognition
-        .detectFaces({ Image: { Bytes: refBuffer }, Attributes: ['DEFAULT'] })
-        .promise();
-      const faceCount = (detectRes.FaceDetails || []).length;
-      console.log(`Reference photo: ${faceCount} face(s) detected`);
-      if (faceCount === 0) {
+    // 1. Convert each refPhoto (data URL) to a validated Buffer
+    const refBuffers = [];
+    for (let i = 0; i < rawPhotos.length; i++) {
+      const base64Data = rawPhotos[i].split(',')[1];
+      if (!base64Data) {
+        return res.status(400).json({ error: `Reference photo #${i + 1} has an invalid format.` });
+      }
+      const buf = Buffer.from(base64Data, 'base64');
+      const sizeMB = buf.length / (1024 * 1024);
+      console.log(`Reference photo #${i + 1} size: ${sizeMB.toFixed(2)} MB`);
+      if (sizeMB > 5) {
         return res.status(400).json({
-          error: 'No face detected in your reference photo. Upload a clear, front-facing photo with good lighting.',
+          error: `Reference photo #${i + 1} is too large (${sizeMB.toFixed(1)} MB). Rekognition limit is 5 MB. Please upload a smaller image.`,
         });
       }
-    } catch (detectErr) {
-      console.error('DetectFaces error on reference photo:', detectErr.code, detectErr.message);
-      return res.status(500).json({
-        error: 'Could not validate reference photo with AWS Rekognition.',
-        details: detectErr.message,
-        code: detectErr.code,
-      });
+
+      // Pre-validate: make sure Rekognition can detect at least one face
+      try {
+        const detectRes = await rekognition
+          .detectFaces({ Image: { Bytes: buf }, Attributes: ['DEFAULT'] })
+          .promise();
+        const faceCount = (detectRes.FaceDetails || []).length;
+        console.log(`Reference photo #${i + 1}: ${faceCount} face(s) detected`);
+        if (faceCount === 0) {
+          return res.status(400).json({
+            error: `No face detected in reference photo #${i + 1}. Upload a clear, front-facing photo with good lighting.`,
+          });
+        }
+      } catch (detectErr) {
+        console.error(`DetectFaces error on ref photo #${i + 1}:`, detectErr.code, detectErr.message);
+        return res.status(500).json({
+          error: `Could not validate reference photo #${i + 1} with AWS Rekognition.`,
+          details: detectErr.message,
+          code: detectErr.code,
+        });
+      }
+
+      refBuffers.push(buf);
     }
+
+    console.log(`Using ${refBuffers.length} reference photo(s) for comparison`);
 
     // 2. Fetch both uploaded and tagged photo sets.
     let uploadedPhotos = [];
@@ -297,6 +309,7 @@ app.post('/analyze', async (req, res) => {
         message:
           'Facebook returned 0 accessible photos. This usually means the account has no uploaded/tagged photos available to this app yet, or the app lacks access for this Facebook user.',
         diagnostics: {
+          refPhotosUsed: refBuffers.length,
           uploadedPhotos: uploadedPhotos.length,
           taggedPhotos: taggedPhotos.length,
           scannedPhotos: 0,
@@ -331,7 +344,7 @@ app.post('/analyze', async (req, res) => {
       );
     };
 
-    // 3. For each photo, compare faces using Rekognition
+    // 3. For each Facebook photo, compare against ALL reference photos — keep the best score
     for (const photo of photos) {
       const bestImage = photo.images?.[0];
       if (!bestImage || !bestImage.source) {
@@ -340,11 +353,9 @@ app.post('/analyze', async (req, res) => {
       }
 
       try {
-        // Download the photo bytes
         const imgRes = await axios.get(bestImage.source, { responseType: 'arraybuffer' });
         const imgBuffer = Buffer.from(imgRes.data);
 
-        // Skip photos that exceed Rekognition's 5 MB inline limit
         if (imgBuffer.length > 5 * 1024 * 1024) {
           console.warn(`Skipping photo ${photo.id}: ${(imgBuffer.length / 1024 / 1024).toFixed(1)} MB exceeds 5 MB limit`);
           skippedPhotos += 1;
@@ -352,40 +363,56 @@ app.post('/analyze', async (req, res) => {
         }
 
         comparedPhotos += 1;
+        let bestSimilarity = 0;
 
-        // Compare faces
-        const rekRes = await rekognition
-          .compareFaces({
-            SourceImage: { Bytes: refBuffer },
-            TargetImage: { Bytes: imgBuffer },
-            SimilarityThreshold: 40,
-          })
-          .promise();
+        for (const refBuf of refBuffers) {
+          try {
+            const rekRes = await rekognition
+              .compareFaces({
+                SourceImage: { Bytes: refBuf },
+                TargetImage: { Bytes: imgBuffer },
+                SimilarityThreshold: 40,
+              })
+              .promise();
 
-        const faceMatch = (rekRes.FaceMatches || [])[0];
-        if (faceMatch && faceMatch.Similarity) {
+            const faceMatch = (rekRes.FaceMatches || [])[0];
+            if (faceMatch && faceMatch.Similarity > bestSimilarity) {
+              bestSimilarity = faceMatch.Similarity;
+            }
+          } catch (cmpErr) {
+            // If one ref photo fails on this target, try the next ref photo
+            console.error(`Rekognition compare error (photo ${photo.id}, ref): [${cmpErr.code}] ${cmpErr.message}`);
+            if (isAwsAuthError(cmpErr)) {
+              awsAuthError = cmpErr;
+              break;
+            }
+            if (isAwsPermissionError(cmpErr)) {
+              return res.status(500).json({
+                error: 'AWS Rekognition permission denied',
+                details: cmpErr.message,
+                fix: 'Attach an IAM policy allowing rekognition:CompareFaces on *.',
+              });
+            }
+          }
+        }
+
+        if (awsAuthError) break;
+
+        if (bestSimilarity > 0) {
           matches.push({
             id: photo.id,
             url: bestImage.source,
-            confidence: Math.round(faceMatch.Similarity),
+            confidence: Math.round(bestSimilarity),
             date: photo.created_time || null,
           });
         }
       } catch (err) {
-        console.error(`Rekognition error for photo ${photo.id}: [${err.code}] ${err.message}`);
+        console.error(`Error processing photo ${photo.id}: [${err.code || ''}] ${err.message}`);
         rekognitionErrors += 1;
         if (isAwsAuthError(err)) {
           awsAuthError = err;
           break;
         }
-        if (isAwsPermissionError(err)) {
-          return res.status(500).json({
-            error: 'AWS Rekognition permission denied',
-            details: err.message,
-            fix: 'Attach an IAM policy to this AWS user/role allowing rekognition:CompareFaces (and optionally rekognition:DetectFaces) on *.',
-          });
-        }
-        // continue with next photo
       }
     }
 
@@ -393,28 +420,30 @@ app.post('/analyze', async (req, res) => {
       return res.status(500).json({
         error: 'AWS Rekognition authentication failed',
         details: awsAuthError.message,
-        fix: 'Update AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION in Render. If using temporary credentials, also set AWS_SESSION_TOKEN.',
+        fix: 'Update AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION in Render.',
       });
     }
 
     matches.sort((left, right) => (right.confidence || 0) - (left.confidence || 0));
 
-    let message = `Scanned ${comparedPhotos} Facebook photos.`;
-    if (!matches.length) {
+    let message = `Scanned ${comparedPhotos} Facebook photos using ${refBuffers.length} reference photo(s).`;
+    if (matches.length) {
+      message += ` Found ${matches.length} match(es).`;
+    } else {
       if (rekognitionErrors > 0 && rekognitionErrors >= comparedPhotos) {
-        message = `Tried to scan ${comparedPhotos} Facebook photos but every comparison failed (${rekognitionErrors} errors). This usually means the reference photo or Facebook photos couldn't be processed by AWS Rekognition. Try a different reference photo.`;
+        message = `Tried to scan ${comparedPhotos} photos but every comparison failed (${rekognitionErrors} errors). Try different reference photos.`;
       } else if (comparedPhotos > 0) {
-        message = `Scanned ${comparedPhotos} Facebook photos but found no face matches above 40% similarity. Try a clearer front-facing reference photo.`;
+        message = `Scanned ${comparedPhotos} photos with ${refBuffers.length} reference(s) but found no face matches above 40%. Try clearer front-facing reference photos.`;
       } else {
-        message = 'Facebook photos were found, but none could be processed into face comparisons.';
+        message = 'Facebook photos were found, but none could be processed.';
       }
     }
 
-    // 4. Return matches in the format your frontend expects
     res.json({
       matches,
       message,
       diagnostics: {
+        refPhotosUsed: refBuffers.length,
         uploadedPhotos: uploadedPhotos.length,
         taggedPhotos: taggedPhotos.length,
         totalUniquePhotos: photos.length,
