@@ -19,6 +19,29 @@ const rekognition = new AWS.Rekognition();
 // Temporary storage (not used heavily now, but kept if needed later)
 const sessions = {};
 
+// Deduplicate OAuth codes: track codes that are in-flight or already exchanged.
+// Entries expire after 5 minutes so memory doesn't grow unboundedly.
+const usedCodes = new Map(); // code -> timestamp
+const CODE_TTL_MS = 5 * 60 * 1000;
+
+function isCodeUsed(code) {
+  const ts = usedCodes.get(code);
+  if (!ts) return false;
+  if (Date.now() - ts > CODE_TTL_MS) {
+    usedCodes.delete(code);
+    return false;
+  }
+  return true;
+}
+
+function markCodeUsed(code) {
+  usedCodes.set(code, Date.now());
+  // Opportunistic cleanup of stale entries
+  for (const [k, ts] of usedCodes.entries()) {
+    if (Date.now() - ts > CODE_TTL_MS) usedCodes.delete(k);
+  }
+}
+
 // Facebook OAuth callback (legacy, not really used by frontend)
 app.get('/auth/facebook/callback', async (req, res) => {
   const { code } = req.query;
@@ -38,6 +61,15 @@ app.get('/auth/callback', async (req, res) => {
   if (!code) {
     return res.status(400).send('Missing code query parameter');
   }
+
+  // Reject duplicate codes immediately — prevents "code already used" loops
+  // when Facebook replays the redirect or Render retries the request.
+  if (isCodeUsed(code)) {
+    console.warn('Duplicate OAuth code received — ignoring:', code.slice(0, 20) + '...');
+    const frontendUrl = process.env.FRONTEND_URL || 'https://heartbreaksweeper.com';
+    return res.redirect(`${frontendUrl}?auth_error=code_used`);
+  }
+  markCodeUsed(code);
 
   const oauthEnv = ['FB_APP_ID', 'FB_APP_SECRET', 'FB_REDIRECT_URI'];
   const missingOauthEnv = oauthEnv.filter((key) => !process.env[key]);
