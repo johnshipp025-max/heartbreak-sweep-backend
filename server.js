@@ -19,27 +19,28 @@ const rekognition = new AWS.Rekognition();
 // Temporary storage (not used heavily now, but kept if needed later)
 const sessions = {};
 
-// Deduplicate OAuth codes: track codes that are in-flight or already exchanged.
-// Entries expire after 5 minutes so memory doesn't grow unboundedly.
-const usedCodes = new Map(); // code -> timestamp
+// Cache OAuth callback work by authorization code so duplicate hits can reuse
+// the first result instead of re-exchanging the same one-time code.
+const oauthCallbacks = new Map(); // code -> { timestamp, promise }
 const CODE_TTL_MS = 5 * 60 * 1000;
 
-function isCodeUsed(code) {
-  const ts = usedCodes.get(code);
-  if (!ts) return false;
-  if (Date.now() - ts > CODE_TTL_MS) {
-    usedCodes.delete(code);
-    return false;
+function pruneOauthCallbacks() {
+  const now = Date.now();
+  for (const [code, entry] of oauthCallbacks.entries()) {
+    if (now - entry.timestamp > CODE_TTL_MS) {
+      oauthCallbacks.delete(code);
+    }
   }
-  return true;
 }
 
-function markCodeUsed(code) {
-  usedCodes.set(code, Date.now());
-  // Opportunistic cleanup of stale entries
-  for (const [k, ts] of usedCodes.entries()) {
-    if (Date.now() - ts > CODE_TTL_MS) usedCodes.delete(k);
+function buildFrontendRedirect(frontendUrl, params = {}) {
+  const redirectTarget = new URL(frontendUrl);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') {
+      redirectTarget.searchParams.set(key, value);
+    }
   }
+  return redirectTarget.toString();
 }
 
 // Facebook OAuth callback (legacy, not really used by frontend)
@@ -50,6 +51,12 @@ app.get('/auth/facebook/callback', async (req, res) => {
 
 // Generic auth callback endpoint used by frontend
 app.get('/auth/callback', async (req, res) => {
+  res.set({
+    'Cache-Control': 'no-store, no-cache, max-age=0, must-revalidate',
+    Pragma: 'no-cache',
+    Expires: '0',
+  });
+
   const code = req.query.code;
   console.log('Callback code:', code);
 
@@ -57,19 +64,29 @@ app.get('/auth/callback', async (req, res) => {
   const normalizedRedirect = envRedirect.trim().replace(/^"|"$/g, '');
   const fallbackRedirect = `${req.protocol}://${req.get('host')}/auth/callback`;
   const redirectUri = normalizedRedirect || fallbackRedirect;
+  const frontendUrl = process.env.FRONTEND_URL || 'https://heartbreaksweeper.com';
 
   if (!code) {
     return res.status(400).send('Missing code query parameter');
   }
 
-  // Reject duplicate codes immediately — prevents "code already used" loops
-  // when Facebook replays the redirect or Render retries the request.
-  if (isCodeUsed(code)) {
-    console.warn('Duplicate OAuth code received — ignoring:', code.slice(0, 20) + '...');
-    const frontendUrl = process.env.FRONTEND_URL || 'https://heartbreaksweeper.com';
-    return res.redirect(`${frontendUrl}?auth_error=code_used`);
+  pruneOauthCallbacks();
+
+  const existingCallback = oauthCallbacks.get(code);
+  if (existingCallback) {
+    console.warn('Duplicate OAuth code received — reusing first callback result');
+    try {
+      const redirectUrl = await existingCallback.promise;
+      return res.redirect(redirectUrl);
+    } catch (err) {
+      return res.redirect(
+        buildFrontendRedirect(frontendUrl, {
+          auth_error: 'login_failed',
+          message: 'Facebook login failed. Try again.',
+        })
+      );
+    }
   }
-  markCodeUsed(code);
 
   const oauthEnv = ['FB_APP_ID', 'FB_APP_SECRET', 'FB_REDIRECT_URI'];
   const missingOauthEnv = oauthEnv.filter((key) => !process.env[key]);
@@ -80,19 +97,21 @@ app.get('/auth/callback', async (req, res) => {
     });
   }
 
-  try {
+  const callbackPromise = (async () => {
     // Validate redirect URI before using it in OAuth token exchange.
     try {
       new URL(redirectUri);
     } catch {
-      return res.status(500).json({
-        error: 'OAuth is not configured on the server',
-        details: 'FB_REDIRECT_URI is not a valid absolute URL',
-        callback: redirectUri,
-      });
+      throw {
+        status: 500,
+        body: {
+          error: 'OAuth is not configured on the server',
+          details: 'FB_REDIRECT_URI is not a valid absolute URL',
+          callback: redirectUri,
+        },
+      };
     }
 
-    // 1. Exchange code for access token
     const tokenRes = await axios.get(
       'https://graph.facebook.com/v18.0/oauth/access_token',
       {
@@ -107,7 +126,6 @@ app.get('/auth/callback', async (req, res) => {
 
     const accessToken = tokenRes.data.access_token;
 
-    // 2. Get user profile
     const userRes = await axios.get('https://graph.facebook.com/me', {
       params: {
         access_token: accessToken,
@@ -116,24 +134,26 @@ app.get('/auth/callback', async (req, res) => {
     });
 
     const user = userRes.data;
-
-    // 3. Store session in memory (optional)
     sessions[user.id] = { accessToken, user };
 
-    // 4. Redirect back to frontend with user ID and token
-    const frontendUrl = process.env.FRONTEND_URL || 'https://heartbreaksweeper.com';
-    const redirectTarget = new URL(frontendUrl);
+    return buildFrontendRedirect(frontendUrl, {
+      user: user.id,
+      userId: user.id,
+      id: user.id,
+      token: accessToken,
+      access_token: accessToken,
+      fbToken: accessToken,
+    });
+  })();
 
-    // Include common key variants so different frontend implementations can read the login result.
-    redirectTarget.searchParams.set('user', user.id);
-    redirectTarget.searchParams.set('userId', user.id);
-    redirectTarget.searchParams.set('id', user.id);
+  oauthCallbacks.set(code, {
+    timestamp: Date.now(),
+    promise: callbackPromise,
+  });
 
-    redirectTarget.searchParams.set('token', accessToken);
-    redirectTarget.searchParams.set('access_token', accessToken);
-    redirectTarget.searchParams.set('fbToken', accessToken);
-
-    res.redirect(redirectTarget.toString());
+  try {
+    const redirectUrl = await callbackPromise;
+    res.redirect(redirectUrl);
   } catch (err) {
     const oauthError = err.response?.data || { message: err.message };
     console.error('OAuth error:', oauthError);
@@ -143,8 +163,16 @@ app.get('/auth/callback', async (req, res) => {
     const fbCode = fbError?.code;
     const fbSubcode = fbError?.error_subcode;
     if (fbCode === 100 && fbSubcode === 36009) {
-      const frontendUrl = process.env.FRONTEND_URL || 'https://heartbreaksweeper.com';
-      return res.redirect(`${frontendUrl}?auth_error=code_used`);
+      return res.redirect(
+        buildFrontendRedirect(frontendUrl, {
+          auth_error: 'code_used',
+          message: 'Facebook retried an old login. Please start one fresh login attempt.',
+        })
+      );
+    }
+
+    if (err.status && err.body) {
+      return res.status(err.status).json(err.body);
     }
 
     res.status(500).json({
