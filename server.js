@@ -44,12 +44,12 @@ function buildFrontendRedirect(frontendUrl, params = {}) {
 }
 
 async function fetchFacebookPhotoSet(token, type) {
-  const response = await fetch(
-    `https://graph.facebook.com/v18.0/me/photos?fields=images,created_time&limit=100&type=${encodeURIComponent(
-      type
-    )}&access_token=${encodeURIComponent(token)}`
-  );
-  const data = await response.json();
+  const url = `https://graph.facebook.com/v18.0/me/photos?fields=images,created_time&limit=100&type=${encodeURIComponent(
+    type
+  )}&access_token=${encodeURIComponent(token)}`;
+  const response = await axios.get(url);
+  const data = response.data;
+  console.log(`Facebook ${type} photos response: ${(data.data || []).length} photos returned`);
   if (data.error) {
     const error = new Error(data.error.message || 'Facebook API error');
     error.details = data.error;
@@ -208,20 +208,20 @@ app.get('/photos', async (req, res) => {
   }
 
   try {
-    const response = await fetch(
+    const response = await axios.get(
       `https://graph.facebook.com/v18.0/me/photos?fields=images,created_time&limit=50&access_token=${encodeURIComponent(
         token
       )}`
     );
-    const data = await response.json();
+    const data = response.data;
     if (data.error) {
       console.error('Facebook /photos error:', data.error);
       return res.status(500).json({ error: 'Facebook API error', details: data.error });
     }
     res.json(data);
   } catch (error) {
-    console.error('Photos error:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('Photos error:', error.response?.data || error.message);
+    res.status(500).json({ error: error.response?.data?.error?.message || error.message });
   }
 });
 
@@ -311,9 +311,8 @@ app.post('/analyze', async (req, res) => {
 
       try {
         // Download the photo bytes
-        const imgRes = await fetch(bestImage.source);
-        const imgArrayBuffer = await imgRes.arrayBuffer();
-        const imgBuffer = Buffer.from(imgArrayBuffer);
+        const imgRes = await axios.get(bestImage.source, { responseType: 'arraybuffer' });
+        const imgBuffer = Buffer.from(imgRes.data);
         comparedPhotos += 1;
 
         // Compare faces
