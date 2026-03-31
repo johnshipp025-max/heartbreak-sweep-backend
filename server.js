@@ -44,18 +44,27 @@ function buildFrontendRedirect(frontendUrl, params = {}) {
 }
 
 async function fetchFacebookPhotoSet(token, type) {
-  const url = `https://graph.facebook.com/v18.0/me/photos?fields=images,created_time&limit=100&type=${encodeURIComponent(
+  let allPhotos = [];
+  let url = `https://graph.facebook.com/v18.0/me/photos?fields=images,created_time&limit=100&type=${encodeURIComponent(
     type
   )}&access_token=${encodeURIComponent(token)}`;
-  const response = await axios.get(url);
-  const data = response.data;
-  console.log(`Facebook ${type} photos response: ${(data.data || []).length} photos returned`);
-  if (data.error) {
-    const error = new Error(data.error.message || 'Facebook API error');
-    error.details = data.error;
-    throw error;
+
+  while (url) {
+    const response = await axios.get(url);
+    const data = response.data;
+    if (data.error) {
+      const error = new Error(data.error.message || 'Facebook API error');
+      error.details = data.error;
+      throw error;
+    }
+    const photos = Array.isArray(data.data) ? data.data : [];
+    allPhotos = allPhotos.concat(photos);
+    console.log(`Facebook ${type} photos page: ${photos.length} (total so far: ${allPhotos.length})`);
+    url = data.paging?.next || null;
   }
-  return Array.isArray(data.data) ? data.data : [];
+
+  console.log(`Facebook ${type} photos total: ${allPhotos.length}`);
+  return allPhotos;
 }
 
 // Facebook OAuth callback (legacy, not really used by frontend)
@@ -322,6 +331,8 @@ app.post('/analyze', async (req, res) => {
     let comparedPhotos = 0;
     let skippedPhotos = 0;
     let rekognitionErrors = 0;
+    let compareErrors = 0;
+    let noFaceInTarget = 0;
 
     const isAwsAuthError = (err) => {
       const message = String(err?.message || '').toLowerCase();
@@ -380,8 +391,11 @@ app.post('/analyze', async (req, res) => {
               bestSimilarity = faceMatch.Similarity;
             }
           } catch (cmpErr) {
-            // If one ref photo fails on this target, try the next ref photo
             console.error(`Rekognition compare error (photo ${photo.id}, ref): [${cmpErr.code}] ${cmpErr.message}`);
+            compareErrors += 1;
+            if (cmpErr.code === 'InvalidParameterException' && /no face/i.test(cmpErr.message)) {
+              noFaceInTarget += 1;
+            }
             if (isAwsAuthError(cmpErr)) {
               awsAuthError = cmpErr;
               break;
@@ -398,6 +412,7 @@ app.post('/analyze', async (req, res) => {
 
         if (awsAuthError) break;
 
+        console.log(`Photo ${photo.id}: bestSimilarity=${bestSimilarity.toFixed(1)}`);
         if (bestSimilarity > 0) {
           matches.push({
             id: photo.id,
@@ -430,10 +445,10 @@ app.post('/analyze', async (req, res) => {
     if (matches.length) {
       message += ` Found ${matches.length} match(es).`;
     } else {
-      if (rekognitionErrors > 0 && rekognitionErrors >= comparedPhotos) {
-        message = `Tried to scan ${comparedPhotos} photos but every comparison failed (${rekognitionErrors} errors). Try different reference photos.`;
+      if ((rekognitionErrors + compareErrors) > 0 && (rekognitionErrors + compareErrors) >= comparedPhotos) {
+        message = `Tried to scan ${comparedPhotos} photos but comparisons failed (${compareErrors} compare errors, ${noFaceInTarget} no-face-in-target). Try different reference photos.`;
       } else if (comparedPhotos > 0) {
-        message = `Scanned ${comparedPhotos} photos with ${refBuffers.length} reference(s) but found no face matches above 40%. Try clearer front-facing reference photos.`;
+        message = `Scanned ${comparedPhotos} photos with ${refBuffers.length} reference(s) but found no face matches above 40% (${compareErrors} compare errors, ${noFaceInTarget} no-face-in-target). Try clearer front-facing reference photos.`;
       } else {
         message = 'Facebook photos were found, but none could be processed.';
       }
@@ -450,6 +465,8 @@ app.post('/analyze', async (req, res) => {
         comparedPhotos,
         skippedPhotos,
         rekognitionErrors,
+        compareErrors,
+        noFaceInTarget,
       },
     });
   } catch (err) {
