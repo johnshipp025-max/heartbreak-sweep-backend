@@ -43,6 +43,21 @@ function buildFrontendRedirect(frontendUrl, params = {}) {
   return redirectTarget.toString();
 }
 
+async function fetchFacebookPhotoSet(token, type) {
+  const response = await fetch(
+    `https://graph.facebook.com/v18.0/me/photos?fields=images,created_time&limit=100&type=${encodeURIComponent(
+      type
+    )}&access_token=${encodeURIComponent(token)}`
+  );
+  const data = await response.json();
+  if (data.error) {
+    const error = new Error(data.error.message || 'Facebook API error');
+    error.details = data.error;
+    throw error;
+  }
+  return Array.isArray(data.data) ? data.data : [];
+}
+
 // Facebook OAuth callback (legacy, not really used by frontend)
 app.get('/auth/facebook/callback', async (req, res) => {
   const { code } = req.query;
@@ -226,22 +241,44 @@ app.post('/analyze', async (req, res) => {
     }
     const refBuffer = Buffer.from(base64Data, 'base64');
 
-    // 2. Fetch user's photos from Facebook
-    const photosRes = await fetch(
-      `https://graph.facebook.com/v18.0/me/photos?fields=images,created_time&limit=50&access_token=${encodeURIComponent(
-        token
-      )}`
-    );
-    const photosData = await photosRes.json();
-
-    if (photosData.error) {
-      console.error('Facebook /me/photos error:', photosData.error);
-      return res.status(500).json({ error: 'Facebook API error', details: photosData.error });
+    // 2. Fetch both uploaded and tagged photo sets.
+    let uploadedPhotos = [];
+    let taggedPhotos = [];
+    try {
+      [uploadedPhotos, taggedPhotos] = await Promise.all([
+        fetchFacebookPhotoSet(token, 'uploaded'),
+        fetchFacebookPhotoSet(token, 'tagged'),
+      ]);
+    } catch (error) {
+      console.error('Facebook /me/photos error:', error.details || error.message);
+      return res.status(500).json({
+        error: 'Facebook API error',
+        details: error.details || error.message,
+      });
     }
 
-    const photos = Array.isArray(photosData.data) ? photosData.data : [];
+    const photos = Array.from(
+      new Map([...uploadedPhotos, ...taggedPhotos].map((photo) => [photo.id, photo])).values()
+    );
+
+    if (!photos.length) {
+      return res.json({
+        matches: [],
+        message:
+          'Facebook returned 0 accessible photos. This usually means the account has no uploaded/tagged photos available to this app yet, or the app lacks access for this Facebook user.',
+        diagnostics: {
+          uploadedPhotos: uploadedPhotos.length,
+          taggedPhotos: taggedPhotos.length,
+          scannedPhotos: 0,
+        },
+      });
+    }
+
     const matches = [];
     let awsAuthError = null;
+    let comparedPhotos = 0;
+    let skippedPhotos = 0;
+    let rekognitionErrors = 0;
 
     const isAwsAuthError = (err) => {
       const message = String(err?.message || '').toLowerCase();
@@ -267,20 +304,24 @@ app.post('/analyze', async (req, res) => {
     // 3. For each photo, compare faces using Rekognition
     for (const photo of photos) {
       const bestImage = photo.images?.[0];
-      if (!bestImage || !bestImage.source) continue;
+      if (!bestImage || !bestImage.source) {
+        skippedPhotos += 1;
+        continue;
+      }
 
       try {
         // Download the photo bytes
         const imgRes = await fetch(bestImage.source);
         const imgArrayBuffer = await imgRes.arrayBuffer();
         const imgBuffer = Buffer.from(imgArrayBuffer);
+        comparedPhotos += 1;
 
         // Compare faces
         const rekRes = await rekognition
           .compareFaces({
             SourceImage: { Bytes: refBuffer },
             TargetImage: { Bytes: imgBuffer },
-            SimilarityThreshold: 70, // adjust as needed
+            SimilarityThreshold: 40,
           })
           .promise();
 
@@ -295,6 +336,7 @@ app.post('/analyze', async (req, res) => {
         }
       } catch (err) {
         console.error(`Rekognition error for photo ${photo.id}:`, err.message);
+        rekognitionErrors += 1;
         if (isAwsAuthError(err)) {
           awsAuthError = err;
           break;
@@ -318,8 +360,29 @@ app.post('/analyze', async (req, res) => {
       });
     }
 
+    matches.sort((left, right) => (right.confidence || 0) - (left.confidence || 0));
+
+    let message = `Scanned ${comparedPhotos} Facebook photos.`;
+    if (!matches.length) {
+      message =
+        comparedPhotos > 0
+          ? `Scanned ${comparedPhotos} Facebook photos but found no face matches above 40% similarity. Try a clearer front-facing reference photo.`
+          : 'Facebook photos were found, but none could be processed into face comparisons.';
+    }
+
     // 4. Return matches in the format your frontend expects
-    res.json({ matches });
+    res.json({
+      matches,
+      message,
+      diagnostics: {
+        uploadedPhotos: uploadedPhotos.length,
+        taggedPhotos: taggedPhotos.length,
+        totalUniquePhotos: photos.length,
+        comparedPhotos,
+        skippedPhotos,
+        rekognitionErrors,
+      },
+    });
   } catch (err) {
     console.error('Analyze error:', err.message);
     res.status(500).json({ error: 'Analysis failed', details: err.message });
