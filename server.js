@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const AWS = require('aws-sdk');
+const sharp = require('sharp');
 
 const app = express();
 app.use(cors());
@@ -257,7 +258,18 @@ app.post('/analyze', async (req, res) => {
       if (!base64Data) {
         return res.status(400).json({ error: `Reference photo #${i + 1} has an invalid format.` });
       }
-      const buf = Buffer.from(base64Data, 'base64');
+      const rawBuf = Buffer.from(base64Data, 'base64');
+
+      // Convert to JPEG to guarantee Rekognition compatibility (WebP, BMP, GIF not supported)
+      let buf;
+      try {
+        buf = await sharp(rawBuf).jpeg({ quality: 95 }).toBuffer();
+      } catch (sharpErr) {
+        return res.status(400).json({
+          error: `Reference photo #${i + 1} is not a valid image: ${sharpErr.message}`,
+        });
+      }
+
       const sizeMB = buf.length / (1024 * 1024);
       console.log(`Reference photo #${i + 1} size: ${sizeMB.toFixed(2)} MB`);
       if (sizeMB > 5) {
@@ -356,33 +368,56 @@ app.post('/analyze', async (req, res) => {
     };
 
     // 3. For each Facebook photo, compare against ALL reference photos — keep the best score
-    for (const photo of photos) {
+    const PROCESSING_TIME_LIMIT_MS = 4 * 60 * 1000; // 4 minutes (Render allows 5 min max)
+    const BATCH_SIZE = 5;
+    const processingStartTime = Date.now();
+    let timedOut = false;
+    let firstInvalidParamLogged = false;
+    let permissionError = null;
+
+    const processPhoto = async (photo) => {
+      if (awsAuthError || permissionError) return;
+
       const bestImage = photo.images?.[0];
       if (!bestImage || !bestImage.source) {
         skippedPhotos += 1;
-        continue;
+        return;
       }
 
       try {
-        const imgRes = await axios.get(bestImage.source, { responseType: 'arraybuffer' });
-        const imgBuffer = Buffer.from(imgRes.data);
+        const imgRes = await axios.get(bestImage.source, {
+          responseType: 'arraybuffer',
+          timeout: 15000,
+          headers: { Accept: 'image/jpeg, image/png, image/*' },
+        });
+
+        // Convert to JPEG to ensure Rekognition compatibility (Facebook CDN may serve WebP)
+        let imgBuffer;
+        try {
+          imgBuffer = await sharp(Buffer.from(imgRes.data)).jpeg({ quality: 85 }).toBuffer();
+        } catch (convertErr) {
+          console.warn(`Skipping photo ${photo.id}: image conversion failed: ${convertErr.message}`);
+          skippedPhotos += 1;
+          return;
+        }
 
         if (imgBuffer.length > 5 * 1024 * 1024) {
           console.warn(`Skipping photo ${photo.id}: ${(imgBuffer.length / 1024 / 1024).toFixed(1)} MB exceeds 5 MB limit`);
           skippedPhotos += 1;
-          continue;
+          return;
         }
 
         comparedPhotos += 1;
         let bestSimilarity = 0;
 
         for (const refBuf of refBuffers) {
+          if (awsAuthError || permissionError) break;
           try {
             const rekRes = await rekognition
               .compareFaces({
                 SourceImage: { Bytes: refBuf },
                 TargetImage: { Bytes: imgBuffer },
-                SimilarityThreshold: 40,
+                SimilarityThreshold: 30,
               })
               .promise();
 
@@ -391,7 +426,12 @@ app.post('/analyze', async (req, res) => {
               bestSimilarity = faceMatch.Similarity;
             }
           } catch (cmpErr) {
-            console.error(`Rekognition compare error (photo ${photo.id}, ref): [${cmpErr.code}] ${cmpErr.message}`);
+            if (!firstInvalidParamLogged && cmpErr.code === 'InvalidParameterException') {
+              console.error(`FIRST InvalidParameterException — photo ${photo.id}, targetSize=${imgBuffer.length}, refSize=${refBuf.length}, msg: ${cmpErr.message}`);
+              firstInvalidParamLogged = true;
+            } else {
+              console.error(`Rekognition compare error (photo ${photo.id}, ref): [${cmpErr.code}] ${cmpErr.message}`);
+            }
             compareErrors += 1;
             if (cmpErr.code === 'InvalidParameterException' && /no face/i.test(cmpErr.message)) {
               noFaceInTarget += 1;
@@ -401,16 +441,11 @@ app.post('/analyze', async (req, res) => {
               break;
             }
             if (isAwsPermissionError(cmpErr)) {
-              return res.status(500).json({
-                error: 'AWS Rekognition permission denied',
-                details: cmpErr.message,
-                fix: 'Attach an IAM policy allowing rekognition:CompareFaces on *.',
-              });
+              permissionError = cmpErr;
+              break;
             }
           }
         }
-
-        if (awsAuthError) break;
 
         console.log(`Photo ${photo.id}: bestSimilarity=${bestSimilarity.toFixed(1)}`);
         if (bestSimilarity > 0) {
@@ -426,9 +461,27 @@ app.post('/analyze', async (req, res) => {
         rekognitionErrors += 1;
         if (isAwsAuthError(err)) {
           awsAuthError = err;
-          break;
         }
       }
+    };
+
+    for (let i = 0; i < photos.length; i += BATCH_SIZE) {
+      if (awsAuthError || permissionError) break;
+      if (Date.now() - processingStartTime > PROCESSING_TIME_LIMIT_MS) {
+        timedOut = true;
+        console.warn(`Processing time limit reached after ${comparedPhotos}/${photos.length} photos`);
+        break;
+      }
+      const batch = photos.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(processPhoto));
+    }
+
+    if (permissionError) {
+      return res.status(500).json({
+        error: 'AWS Rekognition permission denied',
+        details: permissionError.message,
+        fix: 'Attach an IAM policy allowing rekognition:CompareFaces on *.',
+      });
     }
 
     if (awsAuthError) {
@@ -441,14 +494,17 @@ app.post('/analyze', async (req, res) => {
 
     matches.sort((left, right) => (right.confidence || 0) - (left.confidence || 0));
 
-    let message = `Scanned ${comparedPhotos} Facebook photos using ${refBuffers.length} reference photo(s).`;
+    let message = `Scanned ${comparedPhotos}${timedOut ? ` of ${photos.length}` : ''} Facebook photos using ${refBuffers.length} reference photo(s).`;
+    if (timedOut) {
+      message += ' (Processing time limit reached — partial results returned.)';
+    }
     if (matches.length) {
       message += ` Found ${matches.length} match(es).`;
     } else {
       if ((rekognitionErrors + compareErrors) > 0 && (rekognitionErrors + compareErrors) >= comparedPhotos) {
         message = `Tried to scan ${comparedPhotos} photos but comparisons failed (${compareErrors} compare errors, ${noFaceInTarget} no-face-in-target). Try different reference photos.`;
       } else if (comparedPhotos > 0) {
-        message = `Scanned ${comparedPhotos} photos with ${refBuffers.length} reference(s) but found no face matches above 40% (${compareErrors} compare errors, ${noFaceInTarget} no-face-in-target). Try clearer front-facing reference photos.`;
+        message = `Scanned ${comparedPhotos} photos with ${refBuffers.length} reference(s) but found no face matches above 30% (${compareErrors} compare errors, ${noFaceInTarget} no-face-in-target). Try clearer front-facing reference photos.`;
       } else {
         message = 'Facebook photos were found, but none could be processed.';
       }
@@ -467,6 +523,7 @@ app.post('/analyze', async (req, res) => {
         rekognitionErrors,
         compareErrors,
         noFaceInTarget,
+        timedOut,
       },
     });
   } catch (err) {
