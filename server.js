@@ -46,7 +46,7 @@ function buildFrontendRedirect(frontendUrl, params = {}) {
 
 async function fetchFacebookPhotoSet(token, type) {
   let allPhotos = [];
-  let url = `https://graph.facebook.com/v18.0/me/photos?fields=images,created_time&limit=100&type=${encodeURIComponent(
+  let url = `https://graph.facebook.com/v18.0/me/photos?fields=images,created_time,from&limit=100&type=${encodeURIComponent(
     type
   )}&access_token=${encodeURIComponent(token)}`;
 
@@ -59,7 +59,7 @@ async function fetchFacebookPhotoSet(token, type) {
       throw error;
     }
     const photos = Array.isArray(data.data) ? data.data : [];
-    allPhotos = allPhotos.concat(photos);
+    allPhotos = allPhotos.concat(photos.map(p => ({ ...p, _type: type })));
     console.log(`Facebook ${type} photos page: ${photos.length} (total so far: ${allPhotos.length})`);
     url = data.paging?.next || null;
   }
@@ -367,13 +367,15 @@ app.post('/analyze', async (req, res) => {
       );
     };
 
-    // 3. For each Facebook photo, compare against ALL reference photos — keep the best score
+    // 3. Smart screening: use FIRST ref photo to screen, then verify hits with remaining refs
     const PROCESSING_TIME_LIMIT_MS = 4 * 60 * 1000; // 4 minutes (Render allows 5 min max)
-    const BATCH_SIZE = 5;
+    const BATCH_SIZE = 10;
     const processingStartTime = Date.now();
     let timedOut = false;
     let firstInvalidParamLogged = false;
     let permissionError = null;
+    const primaryRef = refBuffers[0];
+    const secondaryRefs = refBuffers.slice(1);
 
     const processPhoto = async (photo) => {
       if (awsAuthError || permissionError) return;
@@ -410,50 +412,67 @@ app.post('/analyze', async (req, res) => {
         comparedPhotos += 1;
         let bestSimilarity = 0;
 
-        for (const refBuf of refBuffers) {
-          if (awsAuthError || permissionError) break;
-          try {
-            const rekRes = await rekognition
-              .compareFaces({
-                SourceImage: { Bytes: refBuf },
-                TargetImage: { Bytes: imgBuffer },
-                SimilarityThreshold: 30,
-              })
-              .promise();
+        // Screen with primary ref first
+        try {
+          const rekRes = await rekognition
+            .compareFaces({
+              SourceImage: { Bytes: primaryRef },
+              TargetImage: { Bytes: imgBuffer },
+              SimilarityThreshold: 20,
+            })
+            .promise();
 
-            const faceMatch = (rekRes.FaceMatches || [])[0];
-            if (faceMatch && faceMatch.Similarity > bestSimilarity) {
-              bestSimilarity = faceMatch.Similarity;
-            }
-          } catch (cmpErr) {
-            if (!firstInvalidParamLogged && cmpErr.code === 'InvalidParameterException') {
-              console.error(`FIRST InvalidParameterException — photo ${photo.id}, targetSize=${imgBuffer.length}, refSize=${refBuf.length}, msg: ${cmpErr.message}`);
-              firstInvalidParamLogged = true;
-            } else {
-              console.error(`Rekognition compare error (photo ${photo.id}, ref): [${cmpErr.code}] ${cmpErr.message}`);
-            }
-            compareErrors += 1;
-            if (cmpErr.code === 'InvalidParameterException' && /no face/i.test(cmpErr.message)) {
-              noFaceInTarget += 1;
-            }
-            if (isAwsAuthError(cmpErr)) {
-              awsAuthError = cmpErr;
-              break;
-            }
-            if (isAwsPermissionError(cmpErr)) {
-              permissionError = cmpErr;
-              break;
+          const faceMatch = (rekRes.FaceMatches || [])[0];
+          if (faceMatch && faceMatch.Similarity > bestSimilarity) {
+            bestSimilarity = faceMatch.Similarity;
+          }
+        } catch (cmpErr) {
+          if (!firstInvalidParamLogged && cmpErr.code === 'InvalidParameterException') {
+            console.error(`FIRST InvalidParameterException — photo ${photo.id}, targetSize=${imgBuffer.length}, refSize=${primaryRef.length}, msg: ${cmpErr.message}`);
+            firstInvalidParamLogged = true;
+          }
+          compareErrors += 1;
+          if (cmpErr.code === 'InvalidParameterException' && /no face/i.test(cmpErr.message)) {
+            noFaceInTarget += 1;
+          }
+          if (isAwsAuthError(cmpErr)) { awsAuthError = cmpErr; return; }
+          if (isAwsPermissionError(cmpErr)) { permissionError = cmpErr; return; }
+        }
+
+        // Only verify with secondary refs if primary got a hit
+        if (bestSimilarity > 0 && secondaryRefs.length > 0) {
+          for (const refBuf of secondaryRefs) {
+            if (awsAuthError || permissionError) break;
+            try {
+              const rekRes = await rekognition
+                .compareFaces({
+                  SourceImage: { Bytes: refBuf },
+                  TargetImage: { Bytes: imgBuffer },
+                  SimilarityThreshold: 20,
+                })
+                .promise();
+
+              const faceMatch = (rekRes.FaceMatches || [])[0];
+              if (faceMatch && faceMatch.Similarity > bestSimilarity) {
+                bestSimilarity = faceMatch.Similarity;
+              }
+            } catch (cmpErr) {
+              compareErrors += 1;
+              if (isAwsAuthError(cmpErr)) { awsAuthError = cmpErr; break; }
+              if (isAwsPermissionError(cmpErr)) { permissionError = cmpErr; break; }
             }
           }
         }
 
-        console.log(`Photo ${photo.id}: bestSimilarity=${bestSimilarity.toFixed(1)}`);
         if (bestSimilarity > 0) {
+          // Determine ownership
+          const isOwned = photo._type === 'uploaded';
           matches.push({
             id: photo.id,
             url: bestImage.source,
             confidence: Math.round(bestSimilarity),
             date: photo.created_time || null,
+            owned: isOwned,
           });
         }
       } catch (err) {
@@ -504,7 +523,7 @@ app.post('/analyze', async (req, res) => {
       if ((rekognitionErrors + compareErrors) > 0 && (rekognitionErrors + compareErrors) >= comparedPhotos) {
         message = `Tried to scan ${comparedPhotos} photos but comparisons failed (${compareErrors} compare errors, ${noFaceInTarget} no-face-in-target). Try different reference photos.`;
       } else if (comparedPhotos > 0) {
-        message = `Scanned ${comparedPhotos} photos with ${refBuffers.length} reference(s) but found no face matches above 30% (${compareErrors} compare errors, ${noFaceInTarget} no-face-in-target). Try clearer front-facing reference photos.`;
+        message = `Scanned ${comparedPhotos} photos with ${refBuffers.length} reference(s) but found no face matches above 20% (${compareErrors} compare errors, ${noFaceInTarget} no-face-in-target). Try clearer front-facing reference photos.`;
       } else {
         message = 'Facebook photos were found, but none could be processed.';
       }
@@ -532,30 +551,69 @@ app.post('/analyze', async (req, res) => {
   }
 });
 
-// 🔥 Delete endpoint: deletes selected photos from Facebook
+// 🔥 Delete endpoint: deletes OWN photos or untags from others' photos
 app.post('/delete', async (req, res) => {
-  const { token, ids } = req.body;
+  const { token, ids, userId } = req.body;
 
   if (!token || !Array.isArray(ids) || ids.length === 0) {
     return res.status(400).json({ error: 'Missing token or ids in body' });
   }
 
+  // Get current user ID if not provided
+  let currentUserId = userId;
+  if (!currentUserId) {
+    try {
+      const meRes = await axios.get('https://graph.facebook.com/me', {
+        params: { access_token: token, fields: 'id' },
+      });
+      currentUserId = meRes.data.id;
+    } catch (e) {
+      console.error('Could not fetch user ID for untag:', e.message);
+    }
+  }
+
   try {
     const results = [];
 
-    for (const id of ids) {
+    for (const item of ids) {
+      const photoId = typeof item === 'object' ? item.id : item;
+      const isOwned = typeof item === 'object' ? item.owned : true;
+
       try {
-        const delRes = await axios.delete(
-          `https://graph.facebook.com/v18.0/${encodeURIComponent(id)}`,
-          {
-            params: { access_token: token },
-          }
-        );
-        results.push({ id, success: true, response: delRes.data });
+        if (isOwned) {
+          // Delete own photo
+          const delRes = await axios.delete(
+            `https://graph.facebook.com/v18.0/${encodeURIComponent(photoId)}`,
+            { params: { access_token: token } }
+          );
+          results.push({ id: photoId, success: true, action: 'deleted', response: delRes.data });
+        } else if (currentUserId) {
+          // Untag self from others' photo
+          const untagRes = await axios.delete(
+            `https://graph.facebook.com/v18.0/${encodeURIComponent(photoId)}/tags`,
+            { params: { access_token: token, tag_uid: currentUserId } }
+          );
+          results.push({ id: photoId, success: true, action: 'untagged', response: untagRes.data });
+        } else {
+          results.push({ id: photoId, success: false, error: 'Could not determine user ID for untagging' });
+        }
       } catch (err) {
-        console.error(`Delete error for ${id}:`, err.response?.data || err.message);
+        console.error(`Delete/untag error for ${photoId}:`, err.response?.data || err.message);
+        // If delete fails, try untag as fallback
+        if (isOwned && currentUserId) {
+          try {
+            const untagRes = await axios.delete(
+              `https://graph.facebook.com/v18.0/${encodeURIComponent(photoId)}/tags`,
+              { params: { access_token: token, tag_uid: currentUserId } }
+            );
+            results.push({ id: photoId, success: true, action: 'untagged (delete failed)', response: untagRes.data });
+            continue;
+          } catch (untagErr) {
+            console.error(`Untag fallback failed for ${photoId}:`, untagErr.response?.data || untagErr.message);
+          }
+        }
         results.push({
-          id,
+          id: photoId,
           success: false,
           error: err.response?.data || err.message,
         });
