@@ -22,8 +22,9 @@ const sessions = {};
 
 // Cache OAuth callback work by authorization code so duplicate hits can reuse
 // the first result instead of re-exchanging the same one-time code.
-const oauthCallbacks = new Map(); // code -> { timestamp, promise }
+const oauthCallbacks = new Map(); // code -> { timestamp, promise, redirectUrl, reuses }
 const CODE_TTL_MS = 5 * 60 * 1000;
+const MAX_CODE_REUSES = 3;
 
 function pruneOauthCallbacks() {
   const now = Date.now();
@@ -99,7 +100,20 @@ app.get('/auth/callback', async (req, res) => {
 
   const existingCallback = oauthCallbacks.get(code);
   if (existingCallback) {
-    console.warn('Duplicate OAuth code received — reusing first callback result');
+    existingCallback.reuses = (existingCallback.reuses || 0) + 1;
+    // After too many duplicates, stop processing entirely
+    if (existingCallback.reuses > MAX_CODE_REUSES) {
+      return res.status(200).send(
+        '<html><body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding:60px;">' +
+        '<h2>Already authenticated!</h2><p>Return to <a href="' + frontendUrl + '" style="color:#ff2d55;">Heartbreak Sweep</a>.</p>' +
+        '<script>setTimeout(function(){window.location="' + frontendUrl + '"},2000)</script></body></html>'
+      );
+    }
+    // If we already have the redirect URL cached, use it instantly
+    if (existingCallback.redirectUrl) {
+      return res.redirect(existingCallback.redirectUrl);
+    }
+    // Otherwise wait for the original promise (only for first few duplicates)
     try {
       const redirectUrl = await existingCallback.promise;
       return res.redirect(redirectUrl);
@@ -174,10 +188,15 @@ app.get('/auth/callback', async (req, res) => {
   oauthCallbacks.set(code, {
     timestamp: Date.now(),
     promise: callbackPromise,
+    redirectUrl: null,
+    reuses: 0,
   });
 
   try {
     const redirectUrl = await callbackPromise;
+    // Cache the resolved URL so future duplicates resolve instantly
+    const entry = oauthCallbacks.get(code);
+    if (entry) entry.redirectUrl = redirectUrl;
     res.redirect(redirectUrl);
   } catch (err) {
     const oauthError = err.response?.data || { message: err.message };
