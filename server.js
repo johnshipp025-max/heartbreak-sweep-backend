@@ -393,6 +393,8 @@ app.post('/analyze', async (req, res) => {
       bestImageSource: p.images?.[0]?.source || null,
       tags: p.tags,
     }));
+    // Free the raw array now that we've extracted what we need
+    allPhotosRaw.length = 0;
 
     // Apply offset/limit for resume-scan support
     const startOffset = Math.max(0, Math.min(Number(offset) || 0, totalPhotos));
