@@ -705,7 +705,15 @@ app.post('/delete', async (req, res) => {
       }
     }
 
-    res.json({ deleted: results });
+    // Summarize errors for the client
+    const succeeded = results.filter(r => r.success);
+    const failed = results.filter(r => !r.success);
+    const errorReasons = [...new Set(failed.map(r => {
+      const fbErr = r.error?.error || r.error;
+      return fbErr?.message || fbErr?.type || JSON.stringify(r.error || 'Unknown');
+    }).filter(Boolean))];
+
+    res.json({ deleted: results, summary: { succeeded: succeeded.length, failed: failed.length, errorReasons } });
   } catch (err) {
     console.error('Delete endpoint error:', err.message);
     res.status(500).json({ error: 'Delete failed', details: err.message });
