@@ -47,7 +47,7 @@ function buildFrontendRedirect(frontendUrl, params = {}) {
 
 async function fetchFacebookPhotoSet(token, type) {
   let allPhotos = [];
-  let url = `https://graph.facebook.com/v18.0/me/photos?fields=images,created_time,from&limit=100&type=${encodeURIComponent(
+  let url = `https://graph.facebook.com/v18.0/me/photos?fields=images,created_time,from,tags&limit=100&type=${encodeURIComponent(
     type
   )}&access_token=${encodeURIComponent(token)}`;
 
@@ -256,7 +256,7 @@ app.get('/photos', async (req, res) => {
 
 // 🔥 AI Analyze endpoint: compares refPhoto(s) against user's Facebook photos
 app.post('/analyze', async (req, res) => {
-  const { token, refPhoto, refPhotos, offset, limit } = req.body;
+  const { token, refPhoto, refPhotos, offset, limit, targetName } = req.body;
 
   // Accept either a single refPhoto string or an array of refPhotos
   const rawPhotos = Array.isArray(refPhotos) && refPhotos.length > 0
@@ -373,6 +373,10 @@ app.post('/analyze', async (req, res) => {
     let rekognitionErrors = 0;
     let compareErrors = 0;
     let noFaceInTarget = 0;
+    let tagMatches = 0;
+
+    // Normalize target name for tag matching
+    const normalizedTargetName = (targetName || '').trim().toLowerCase();
 
     const isAwsAuthError = (err) => {
       const message = String(err?.message || '').toLowerCase();
@@ -414,6 +418,13 @@ app.post('/analyze', async (req, res) => {
         return;
       }
 
+      // Helper: check tags for name match
+      const checkTagMatch = () => {
+        if (!normalizedTargetName) return false;
+        const tags = photo.tags?.data || [];
+        return tags.some(t => (t.name || '').toLowerCase().includes(normalizedTargetName));
+      };
+
       try {
         const imgRes = await axios.get(bestImage.source, {
           responseType: 'arraybuffer',
@@ -428,12 +439,20 @@ app.post('/analyze', async (req, res) => {
         } catch (convertErr) {
           console.warn(`Skipping photo ${photo.id}: image conversion failed: ${convertErr.message}`);
           skippedPhotos += 1;
+          if (checkTagMatch()) {
+            tagMatches += 1;
+            matches.push({ id: photo.id, url: bestImage.source, confidence: 0, date: photo.created_time || null, owned: photo._type === 'uploaded', matchType: 'tag' });
+          }
           return;
         }
 
         if (imgBuffer.length > 5 * 1024 * 1024) {
           console.warn(`Skipping photo ${photo.id}: ${(imgBuffer.length / 1024 / 1024).toFixed(1)} MB exceeds 5 MB limit`);
           skippedPhotos += 1;
+          if (checkTagMatch()) {
+            tagMatches += 1;
+            matches.push({ id: photo.id, url: bestImage.source, confidence: 0, date: photo.created_time || null, owned: photo._type === 'uploaded', matchType: 'tag' });
+          }
           return;
         }
 
@@ -450,9 +469,11 @@ app.post('/analyze', async (req, res) => {
             })
             .promise();
 
-          const faceMatch = (rekRes.FaceMatches || [])[0];
-          if (faceMatch && faceMatch.Similarity > bestSimilarity) {
-            bestSimilarity = faceMatch.Similarity;
+          // Check ALL face matches — group photos may have multiple faces
+          for (const fm of (rekRes.FaceMatches || [])) {
+            if (fm.Similarity > bestSimilarity) {
+              bestSimilarity = fm.Similarity;
+            }
           }
         } catch (cmpErr) {
           if (!firstInvalidParamLogged && cmpErr.code === 'InvalidParameterException') {
@@ -480,9 +501,10 @@ app.post('/analyze', async (req, res) => {
                 })
                 .promise();
 
-              const faceMatch = (rekRes.FaceMatches || [])[0];
-              if (faceMatch && faceMatch.Similarity > bestSimilarity) {
-                bestSimilarity = faceMatch.Similarity;
+              for (const fm of (rekRes.FaceMatches || [])) {
+                if (fm.Similarity > bestSimilarity) {
+                  bestSimilarity = fm.Similarity;
+                }
               }
             } catch (cmpErr) {
               compareErrors += 1;
@@ -501,6 +523,19 @@ app.post('/analyze', async (req, res) => {
             confidence: Math.round(bestSimilarity),
             date: photo.created_time || null,
             owned: isOwned,
+            matchType: 'face',
+          });
+        } else if (checkTagMatch()) {
+          // Check tags for name match if face recognition didn't hit
+          const isOwned = photo._type === 'uploaded';
+          tagMatches += 1;
+          matches.push({
+            id: photo.id,
+            url: bestImage.source,
+            confidence: 0,
+            date: photo.created_time || null,
+            owned: isOwned,
+            matchType: 'tag',
           });
         }
       } catch (err) {
@@ -572,6 +607,7 @@ app.post('/analyze', async (req, res) => {
         rekognitionErrors,
         compareErrors,
         noFaceInTarget,
+        tagMatches,
         timedOut,
       },
     });
