@@ -47,12 +47,31 @@ function buildFrontendRedirect(frontendUrl, params = {}) {
 
 async function fetchFacebookPhotoSet(token, type) {
   let allPhotos = [];
-  let url = `https://graph.facebook.com/v18.0/me/photos?fields=images,created_time,from,tags&limit=100&type=${encodeURIComponent(
+  // Request tags as a nested edge with sub-fields (tags.fields(name))
+  const fields = 'images,created_time,from,tags.fields(name)';
+  let url = `https://graph.facebook.com/v18.0/me/photos?fields=${encodeURIComponent(fields)}&limit=100&type=${encodeURIComponent(
     type
   )}&access_token=${encodeURIComponent(token)}`;
 
+  // If tags field causes a 400, retry without it
+  let retryWithoutTags = false;
+
   while (url) {
-    const response = await axios.get(url);
+    let response;
+    try {
+      response = await axios.get(url);
+    } catch (fetchErr) {
+      if (!retryWithoutTags && fetchErr.response?.status === 400) {
+        console.warn(`Facebook rejected tags field for ${type} photos, retrying without tags`);
+        retryWithoutTags = true;
+        const fieldsNoTags = 'images,created_time,from';
+        url = `https://graph.facebook.com/v18.0/me/photos?fields=${encodeURIComponent(fieldsNoTags)}&limit=100&type=${encodeURIComponent(
+          type
+        )}&access_token=${encodeURIComponent(token)}`;
+        continue;
+      }
+      throw fetchErr;
+    }
     const data = response.data;
     if (data.error) {
       const error = new Error(data.error.message || 'Facebook API error');
