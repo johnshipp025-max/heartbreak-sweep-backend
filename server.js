@@ -358,11 +358,17 @@ app.post('/analyze', async (req, res) => {
       });
     }
 
-    const allPhotos = Array.from(
+    const allPhotosRaw = Array.from(
       new Map([...uploadedPhotos, ...taggedPhotos].map((photo) => [photo.id, photo])).values()
     );
 
-    const totalPhotos = allPhotos.length;
+    const totalPhotos = allPhotosRaw.length;
+    const uploadedCount = uploadedPhotos.length;
+    const taggedCount = taggedPhotos.length;
+
+    // Free the full photo arrays early to save memory
+    uploadedPhotos = null;
+    taggedPhotos = null;
 
     if (!totalPhotos) {
       return res.json({
@@ -371,13 +377,22 @@ app.post('/analyze', async (req, res) => {
           'Facebook returned 0 accessible photos. This usually means the account has no uploaded/tagged photos available to this app yet, or the app lacks access for this Facebook user.',
         diagnostics: {
           refPhotosUsed: refBuffers.length,
-          uploadedPhotos: uploadedPhotos.length,
-          taggedPhotos: taggedPhotos.length,
+          uploadedPhotos: 0,
+          taggedPhotos: 0,
           scannedPhotos: 0,
           totalPhotos: 0,
         },
       });
     }
+
+    // Strip each photo to only the fields we need — saves memory on large accounts
+    const allPhotos = allPhotosRaw.map(p => ({
+      id: p.id,
+      _type: p._type,
+      created_time: p.created_time,
+      bestImageSource: p.images?.[0]?.source || null,
+      tags: p.tags,
+    }));
 
     // Apply offset/limit for resume-scan support
     const startOffset = Math.max(0, Math.min(Number(offset) || 0, totalPhotos));
@@ -420,7 +435,7 @@ app.post('/analyze', async (req, res) => {
 
     // 3. Smart screening: use FIRST ref photo to screen, then verify hits with remaining refs
     const PROCESSING_TIME_LIMIT_MS = 4 * 60 * 1000; // 4 minutes (Render allows 5 min max)
-    const BATCH_SIZE = 10;
+    const BATCH_SIZE = 3; // Keep low to avoid memory spikes on Render free tier (512 MB)
     const processingStartTime = Date.now();
     let timedOut = false;
     let firstInvalidParamLogged = false;
@@ -431,8 +446,8 @@ app.post('/analyze', async (req, res) => {
     const processPhoto = async (photo) => {
       if (awsAuthError || permissionError) return;
 
-      const bestImage = photo.images?.[0];
-      if (!bestImage || !bestImage.source) {
+      const imageUrl = photo.bestImageSource;
+      if (!imageUrl) {
         skippedPhotos += 1;
         return;
       }
@@ -445,22 +460,26 @@ app.post('/analyze', async (req, res) => {
       };
 
       try {
-        const imgRes = await axios.get(bestImage.source, {
+        const imgRes = await axios.get(imageUrl, {
           responseType: 'arraybuffer',
           timeout: 15000,
           headers: { Accept: 'image/jpeg, image/png, image/*' },
         });
 
         // Convert to JPEG to ensure Rekognition compatibility (Facebook CDN may serve WebP)
+        // Resize to max 1024px to save memory — Rekognition doesn't need full-res
         let imgBuffer;
         try {
-          imgBuffer = await sharp(Buffer.from(imgRes.data)).jpeg({ quality: 85 }).toBuffer();
+          imgBuffer = await sharp(imgRes.data)
+            .resize({ width: 1024, height: 1024, fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 80 })
+            .toBuffer();
         } catch (convertErr) {
           console.warn(`Skipping photo ${photo.id}: image conversion failed: ${convertErr.message}`);
           skippedPhotos += 1;
           if (checkTagMatch()) {
             tagMatches += 1;
-            matches.push({ id: photo.id, url: bestImage.source, confidence: 0, date: photo.created_time || null, owned: photo._type === 'uploaded', matchType: 'tag' });
+            matches.push({ id: photo.id, url: imageUrl, confidence: 0, date: photo.created_time || null, owned: photo._type === 'uploaded', matchType: 'tag' });
           }
           return;
         }
@@ -470,7 +489,7 @@ app.post('/analyze', async (req, res) => {
           skippedPhotos += 1;
           if (checkTagMatch()) {
             tagMatches += 1;
-            matches.push({ id: photo.id, url: bestImage.source, confidence: 0, date: photo.created_time || null, owned: photo._type === 'uploaded', matchType: 'tag' });
+            matches.push({ id: photo.id, url: imageUrl, confidence: 0, date: photo.created_time || null, owned: photo._type === 'uploaded', matchType: 'tag' });
           }
           return;
         }
@@ -538,7 +557,7 @@ app.post('/analyze', async (req, res) => {
           const isOwned = photo._type === 'uploaded';
           matches.push({
             id: photo.id,
-            url: bestImage.source,
+            url: imageUrl,
             confidence: Math.round(bestSimilarity),
             date: photo.created_time || null,
             owned: isOwned,
@@ -550,7 +569,7 @@ app.post('/analyze', async (req, res) => {
           tagMatches += 1;
           matches.push({
             id: photo.id,
-            url: bestImage.source,
+            url: imageUrl,
             confidence: 0,
             date: photo.created_time || null,
             owned: isOwned,
@@ -617,8 +636,8 @@ app.post('/analyze', async (req, res) => {
       message,
       diagnostics: {
         refPhotosUsed: refBuffers.length,
-        uploadedPhotos: uploadedPhotos.length,
-        taggedPhotos: taggedPhotos.length,
+        uploadedPhotos: uploadedCount,
+        taggedPhotos: taggedCount,
         totalPhotos,
         scannedRange: [startOffset, scannedUpTo],
         comparedPhotos,
