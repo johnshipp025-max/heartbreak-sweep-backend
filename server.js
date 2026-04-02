@@ -256,7 +256,7 @@ app.get('/photos', async (req, res) => {
 
 // 🔥 AI Analyze endpoint: compares refPhoto(s) against user's Facebook photos
 app.post('/analyze', async (req, res) => {
-  const { token, refPhoto, refPhotos } = req.body;
+  const { token, refPhoto, refPhotos, offset, limit } = req.body;
 
   // Accept either a single refPhoto string or an array of refPhotos
   const rawPhotos = Array.isArray(refPhotos) && refPhotos.length > 0
@@ -339,11 +339,13 @@ app.post('/analyze', async (req, res) => {
       });
     }
 
-    const photos = Array.from(
+    const allPhotos = Array.from(
       new Map([...uploadedPhotos, ...taggedPhotos].map((photo) => [photo.id, photo])).values()
     );
 
-    if (!photos.length) {
+    const totalPhotos = allPhotos.length;
+
+    if (!totalPhotos) {
       return res.json({
         matches: [],
         message:
@@ -353,9 +355,16 @@ app.post('/analyze', async (req, res) => {
           uploadedPhotos: uploadedPhotos.length,
           taggedPhotos: taggedPhotos.length,
           scannedPhotos: 0,
+          totalPhotos: 0,
         },
       });
     }
+
+    // Apply offset/limit for resume-scan support
+    const startOffset = Math.max(0, Math.min(Number(offset) || 0, totalPhotos));
+    const scanLimit = (Number(limit) > 0) ? Number(limit) : totalPhotos;
+    const photos = allPhotos.slice(startOffset, startOffset + scanLimit);
+    console.log(`Scanning photos ${startOffset} to ${startOffset + photos.length} of ${totalPhotos} total`);
 
     const matches = [];
     let awsAuthError = null;
@@ -507,7 +516,7 @@ app.post('/analyze', async (req, res) => {
       if (awsAuthError || permissionError) break;
       if (Date.now() - processingStartTime > PROCESSING_TIME_LIMIT_MS) {
         timedOut = true;
-        console.warn(`Processing time limit reached after ${comparedPhotos}/${photos.length} photos`);
+        console.warn(`Processing time limit reached after ${comparedPhotos}/${photos.length} photos (offset ${startOffset})`);
         break;
       }
       const batch = photos.slice(i, i + BATCH_SIZE);
@@ -532,7 +541,8 @@ app.post('/analyze', async (req, res) => {
 
     matches.sort((left, right) => (right.confidence || 0) - (left.confidence || 0));
 
-    let message = `Scanned ${comparedPhotos}${timedOut ? ` of ${photos.length}` : ''} Facebook photos using ${refBuffers.length} reference photo(s).`;
+    const scannedUpTo = startOffset + comparedPhotos + skippedPhotos;
+    let message = `Scanned ${comparedPhotos} Facebook photos (range ${startOffset + 1}–${scannedUpTo} of ${totalPhotos}) using ${refBuffers.length} reference photo(s).`;
     if (timedOut) {
       message += ' (Processing time limit reached — partial results returned.)';
     }
@@ -555,7 +565,8 @@ app.post('/analyze', async (req, res) => {
         refPhotosUsed: refBuffers.length,
         uploadedPhotos: uploadedPhotos.length,
         taggedPhotos: taggedPhotos.length,
-        totalUniquePhotos: photos.length,
+        totalPhotos,
+        scannedRange: [startOffset, scannedUpTo],
         comparedPhotos,
         skippedPhotos,
         rekognitionErrors,
