@@ -20,6 +20,19 @@ const rekognition = new AWS.Rekognition();
 // Temporary storage (not used heavily now, but kept if needed later)
 const sessions = {};
 
+// Background scan jobs storage
+const scanJobs = new Map(); // jobId -> { status, progress, matches, error, ... }
+const JOB_TTL_MS = 30 * 60 * 1000; // 30 min — clean up old jobs
+function pruneJobs() {
+  const now = Date.now();
+  for (const [id, job] of scanJobs.entries()) {
+    if (now - job.createdAt > JOB_TTL_MS) scanJobs.delete(id);
+  }
+}
+function generateJobId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
 // Cache OAuth callback work by authorization code so duplicate hits can reuse
 // the first result instead of re-exchanging the same one-time code.
 const oauthCallbacks = new Map(); // code -> { timestamp, promise, redirectUrl, reuses }
@@ -437,7 +450,7 @@ app.post('/analyze', async (req, res) => {
 
     // 3. Smart screening: use FIRST ref photo to screen, then verify hits with remaining refs
     const PROCESSING_TIME_LIMIT_MS = 4 * 60 * 1000; // 4 minutes (Render allows 5 min max)
-    const BATCH_SIZE = 3; // Keep low to avoid memory spikes on Render free tier (512 MB)
+    const BATCH_SIZE = 5; // Increased for paid tier (more RAM available)
     const processingStartTime = Date.now();
     let timedOut = false;
     let firstInvalidParamLogged = false;
@@ -657,7 +670,279 @@ app.post('/analyze', async (req, res) => {
   }
 });
 
-// 🔥 Delete endpoint: deletes OWN photos or untags from others' photos
+// � Background scan: Start a scan job that runs without timeout
+app.post('/scan/start', async (req, res) => {
+  const { token, refPhotos: rawRefPhotos, refPhoto, targetName } = req.body;
+
+  const rawPhotos = Array.isArray(rawRefPhotos) && rawRefPhotos.length > 0
+    ? rawRefPhotos
+    : refPhoto ? [refPhoto] : [];
+
+  if (!token || !rawPhotos.length) {
+    return res.status(400).json({ error: 'Missing token or reference photo(s)' });
+  }
+
+  // Validate ref photos upfront before returning jobId
+  const refBuffers = [];
+  for (let i = 0; i < rawPhotos.length; i++) {
+    const base64Data = rawPhotos[i].split(',')[1];
+    if (!base64Data) {
+      return res.status(400).json({ error: `Reference photo #${i + 1} has an invalid format.` });
+    }
+    const rawBuf = Buffer.from(base64Data, 'base64');
+    let buf;
+    try {
+      buf = await sharp(rawBuf).jpeg({ quality: 95 }).toBuffer();
+    } catch (sharpErr) {
+      return res.status(400).json({ error: `Reference photo #${i + 1} is not a valid image: ${sharpErr.message}` });
+    }
+    if (buf.length > 5 * 1024 * 1024) {
+      return res.status(400).json({ error: `Reference photo #${i + 1} is too large. Max 5 MB.` });
+    }
+    try {
+      const detectRes = await rekognition.detectFaces({ Image: { Bytes: buf }, Attributes: ['DEFAULT'] }).promise();
+      if ((detectRes.FaceDetails || []).length === 0) {
+        return res.status(400).json({ error: `No face detected in reference photo #${i + 1}. Upload a clear, front-facing photo.` });
+      }
+    } catch (detectErr) {
+      return res.status(500).json({ error: `Could not validate reference photo #${i + 1}.`, details: detectErr.message });
+    }
+    refBuffers.push(buf);
+  }
+
+  pruneJobs();
+  const jobId = generateJobId();
+  const job = {
+    createdAt: Date.now(),
+    status: 'running',
+    phase: 'fetching',
+    totalPhotos: 0,
+    scannedPhotos: 0,
+    matchCount: 0,
+    matches: [],
+    message: 'Fetching photos from Facebook...',
+    error: null,
+    diagnostics: null,
+  };
+  scanJobs.set(jobId, job);
+
+  // Return immediately — scan runs in background
+  res.json({ jobId });
+
+  // --- Background processing ---
+  (async () => {
+    try {
+      let uploadedPhotos = [];
+      let taggedPhotos = [];
+      try {
+        [uploadedPhotos, taggedPhotos] = await Promise.all([
+          fetchFacebookPhotoSet(token, 'uploaded'),
+          fetchFacebookPhotoSet(token, 'tagged'),
+        ]);
+      } catch (fbErr) {
+        job.status = 'error';
+        job.error = 'Facebook API error: ' + (fbErr.details?.message || fbErr.message);
+        return;
+      }
+
+      const allPhotosRaw = Array.from(
+        new Map([...uploadedPhotos, ...taggedPhotos].map(p => [p.id, p])).values()
+      );
+      const uploadedCount = uploadedPhotos.length;
+      const taggedCount = taggedPhotos.length;
+      uploadedPhotos = null;
+      taggedPhotos = null;
+
+      if (!allPhotosRaw.length) {
+        job.status = 'done';
+        job.message = 'Facebook returned 0 accessible photos.';
+        job.diagnostics = { refPhotosUsed: refBuffers.length, uploadedPhotos: 0, taggedPhotos: 0, totalPhotos: 0, scannedPhotos: 0 };
+        return;
+      }
+
+      const allPhotos = allPhotosRaw.map(p => ({
+        id: p.id,
+        _type: p._type,
+        created_time: p.created_time,
+        bestImageSource: p.images?.[0]?.source || null,
+        tags: p.tags,
+      }));
+      allPhotosRaw.length = 0;
+
+      job.totalPhotos = allPhotos.length;
+      job.phase = 'scanning';
+      job.message = `Scanning ${allPhotos.length} photos...`;
+
+      const normalizedTargetName = (targetName || '').trim().toLowerCase();
+      const BATCH_SIZE = 5;
+      let comparedPhotos = 0;
+      let skippedPhotos = 0;
+      let compareErrors = 0;
+      let noFaceInTarget = 0;
+      let tagMatches = 0;
+      let awsAuthError = null;
+      let permissionError = null;
+
+      const isAwsAuthError = (err) => {
+        const msg = String(err?.message || '').toLowerCase();
+        const code = String(err?.code || '').toLowerCase();
+        return msg.includes('security token included in the request is invalid') || code === 'unrecognizedclientexception' || code === 'invalidsignatureexception';
+      };
+
+      const isAwsPermissionError = (err) => {
+        const code = String(err?.code || '').toLowerCase();
+        const msg = String(err?.message || '').toLowerCase();
+        return code === 'accessdeniedexception' || msg.includes('is not authorized to perform');
+      };
+
+      const processPhoto = async (photo) => {
+        if (awsAuthError || permissionError) return;
+        const imageUrl = photo.bestImageSource;
+        if (!imageUrl) { skippedPhotos++; return; }
+
+        const checkTagMatch = () => {
+          if (!normalizedTargetName) return false;
+          return (photo.tags?.data || []).some(t => (t.name || '').toLowerCase().includes(normalizedTargetName));
+        };
+
+        try {
+          const imgRes = await axios.get(imageUrl, {
+            responseType: 'arraybuffer',
+            timeout: 15000,
+            headers: { Accept: 'image/jpeg, image/png, image/*' },
+          });
+
+          let imgBuffer;
+          try {
+            imgBuffer = await sharp(imgRes.data)
+              .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+              .jpeg({ quality: 85 })
+              .toBuffer();
+          } catch (convertErr) {
+            skippedPhotos++;
+            if (checkTagMatch()) {
+              tagMatches++;
+              job.matches.push({ id: photo.id, url: imageUrl, confidence: 0, date: photo.created_time || null, owned: photo._type === 'uploaded', matchType: 'tag' });
+              job.matchCount = job.matches.length;
+            }
+            return;
+          }
+
+          if (imgBuffer.length > 5 * 1024 * 1024) {
+            skippedPhotos++;
+            if (checkTagMatch()) {
+              tagMatches++;
+              job.matches.push({ id: photo.id, url: imageUrl, confidence: 0, date: photo.created_time || null, owned: photo._type === 'uploaded', matchType: 'tag' });
+              job.matchCount = job.matches.length;
+            }
+            return;
+          }
+
+          comparedPhotos++;
+          let bestSimilarity = 0;
+
+          // Compare against ALL reference photos for maximum accuracy
+          for (const refBuf of refBuffers) {
+            if (awsAuthError || permissionError) break;
+            try {
+              const rekRes = await rekognition.compareFaces({
+                SourceImage: { Bytes: refBuf },
+                TargetImage: { Bytes: imgBuffer },
+                SimilarityThreshold: 20,
+              }).promise();
+              for (const fm of (rekRes.FaceMatches || [])) {
+                if (fm.Similarity > bestSimilarity) bestSimilarity = fm.Similarity;
+              }
+            } catch (cmpErr) {
+              compareErrors++;
+              if (cmpErr.code === 'InvalidParameterException' && /no face/i.test(cmpErr.message)) noFaceInTarget++;
+              if (isAwsAuthError(cmpErr)) { awsAuthError = cmpErr; return; }
+              if (isAwsPermissionError(cmpErr)) { permissionError = cmpErr; return; }
+            }
+          }
+
+          if (bestSimilarity > 0) {
+            job.matches.push({
+              id: photo.id, url: imageUrl, confidence: Math.round(bestSimilarity),
+              date: photo.created_time || null, owned: photo._type === 'uploaded', matchType: 'face',
+            });
+          } else if (checkTagMatch()) {
+            tagMatches++;
+            job.matches.push({
+              id: photo.id, url: imageUrl, confidence: 0,
+              date: photo.created_time || null, owned: photo._type === 'uploaded', matchType: 'tag',
+            });
+          }
+          job.matchCount = job.matches.length;
+        } catch (err) {
+          skippedPhotos++;
+          if (isAwsAuthError(err)) awsAuthError = err;
+        }
+      };
+
+      for (let i = 0; i < allPhotos.length; i += BATCH_SIZE) {
+        if (awsAuthError || permissionError) break;
+        const batch = allPhotos.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(processPhoto));
+        job.scannedPhotos = comparedPhotos + skippedPhotos;
+        job.message = `Scanned ${job.scannedPhotos} of ${job.totalPhotos} photos (${job.matchCount} matches so far)...`;
+      }
+
+      if (awsAuthError) {
+        job.status = 'error';
+        job.error = 'AWS Rekognition authentication failed. Check AWS credentials in Render.';
+        return;
+      }
+      if (permissionError) {
+        job.status = 'error';
+        job.error = 'AWS Rekognition permission denied. Attach rekognition:CompareFaces policy.';
+        return;
+      }
+
+      job.matches.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+      job.status = 'done';
+      job.scannedPhotos = comparedPhotos + skippedPhotos;
+      job.message = `Scanned all ${job.totalPhotos} photos using ${refBuffers.length} reference(s). Found ${job.matches.length} match(es).`;
+      job.diagnostics = {
+        refPhotosUsed: refBuffers.length,
+        uploadedPhotos: uploadedCount,
+        taggedPhotos: taggedCount,
+        totalPhotos: job.totalPhotos,
+        scannedPhotos: comparedPhotos,
+        skippedPhotos,
+        compareErrors,
+        noFaceInTarget,
+        tagMatches,
+      };
+      console.log(`Job ${jobId} complete: ${job.matches.length} matches in ${job.totalPhotos} photos`);
+    } catch (err) {
+      console.error(`Job ${jobId} fatal error:`, err.message);
+      job.status = 'error';
+      job.error = err.message;
+    }
+  })();
+});
+
+// 🚀 Background scan: Poll for job status
+app.get('/scan/status/:jobId', (req, res) => {
+  const job = scanJobs.get(req.params.jobId);
+  if (!job) {
+    return res.status(404).json({ error: 'Job not found. It may have expired.' });
+  }
+  res.json({
+    status: job.status,
+    phase: job.phase,
+    totalPhotos: job.totalPhotos,
+    scannedPhotos: job.scannedPhotos,
+    matchCount: job.matchCount,
+    matches: job.matches,
+    message: job.message,
+    error: job.error,
+    diagnostics: job.diagnostics,
+  });
+});
+
+// �🔥 Delete endpoint: deletes OWN photos or untags from others' photos
 app.post('/delete', async (req, res) => {
   const { token, ids, userId } = req.body;
 
@@ -745,7 +1030,7 @@ app.post('/delete', async (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     status: 'Heartbreak Sweep API Running',
-    endpoints: ['/auth/callback', '/photos', '/analyze', '/delete'],
+    endpoints: ['/auth/callback', '/photos', '/analyze', '/scan/start', '/scan/status/:jobId', '/delete'],
   });
 });
 
