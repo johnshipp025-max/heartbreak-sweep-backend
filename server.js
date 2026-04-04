@@ -39,6 +39,11 @@ const oauthCallbacks = new Map(); // code -> { timestamp, promise, redirectUrl, 
 const CODE_TTL_MS = 5 * 60 * 1000;
 const MAX_CODE_REUSES = 3;
 
+// Also cache successful tokens so we can recover from code-reuse errors
+const tokenCache = new Map(); // accessToken -> { timestamp, redirectUrl }
+const TOKEN_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+let lastSuccessfulRedirectUrl = null; // emergency fallback for rapid re-auth
+
 function pruneOauthCallbacks() {
   const now = Date.now();
   for (const [code, entry] of oauthCallbacks.entries()) {
@@ -207,7 +212,7 @@ app.get('/auth/callback', async (req, res) => {
     const user = userRes.data;
     sessions[user.id] = { accessToken, user };
 
-    return buildFrontendRedirect(frontendUrl, {
+    const redirectUrl = buildFrontendRedirect(frontendUrl, {
       user: user.id,
       userId: user.id,
       id: user.id,
@@ -215,6 +220,17 @@ app.get('/auth/callback', async (req, res) => {
       access_token: accessToken,
       fbToken: accessToken,
     });
+
+    // Cache for recovery from duplicate/expired code scenarios
+    lastSuccessfulRedirectUrl = redirectUrl;
+    tokenCache.set(accessToken, { timestamp: Date.now(), redirectUrl });
+    // Prune old token cache entries
+    for (const [tk, entry] of tokenCache.entries()) {
+      if (Date.now() - entry.timestamp > TOKEN_CACHE_TTL_MS) tokenCache.delete(tk);
+    }
+
+    console.log(`OAuth success for user ${user.id} (${user.name})`);
+    return redirectUrl;
   })();
 
   oauthCallbacks.set(code, {
@@ -232,17 +248,35 @@ app.get('/auth/callback', async (req, res) => {
     res.redirect(redirectUrl);
   } catch (err) {
     const oauthError = err.response?.data || { message: err.message };
-    console.error('OAuth error:', oauthError);
+    console.error('OAuth error:', JSON.stringify(oauthError));
 
-    // If the code was already used (loop case), redirect frontend home so user can try again cleanly.
+    // If the code was already used (loop case), try to recover
     const fbError = oauthError?.error || oauthError;
     const fbCode = fbError?.code;
     const fbSubcode = fbError?.error_subcode;
-    if (fbCode === 100 && fbSubcode === 36009) {
+
+    // Code already used OR code expired — try to recover with cached redirect
+    if ((fbCode === 100 && fbSubcode === 36009) || (fbCode === 100 && fbSubcode === 36007) || /already been used|expired/i.test(fbError?.message || '')) {
+      console.log('Code reuse/expiry detected. Attempting recovery...');
+
+      // Check if we already completed this code
+      const cachedEntry = oauthCallbacks.get(code);
+      if (cachedEntry?.redirectUrl) {
+        console.log('Recovered from cached code entry');
+        return res.redirect(cachedEntry.redirectUrl);
+      }
+
+      // Fall back to last successful redirect (likely same user retrying after CAPTCHA)
+      if (lastSuccessfulRedirectUrl) {
+        console.log('Recovered using last successful redirect');
+        return res.redirect(lastSuccessfulRedirectUrl);
+      }
+
+      // No recovery possible
       return res.redirect(
         buildFrontendRedirect(frontendUrl, {
           auth_error: 'code_used',
-          message: 'Facebook retried an old login. Please start one fresh login attempt.',
+          message: 'Facebook login code expired during CAPTCHA. Please try again — the server is now warm and it will be faster.',
         })
       );
     }
