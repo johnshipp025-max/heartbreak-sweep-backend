@@ -6,6 +6,11 @@ const axios = require('axios');
 const AWS = require('aws-sdk');
 const sharp = require('sharp');
 
+// Stripe setup (uses STRIPE_SECRET_KEY env var)
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? require('stripe')(process.env.STRIPE_SECRET_KEY)
+  : null;
+
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // allow multiple base64 images
@@ -1067,6 +1072,118 @@ app.get('/', (req, res) => {
     endpoints: ['/auth/callback', '/photos', '/analyze', '/scan/start', '/scan/status/:jobId', '/delete'],
   });
 });
+
+// ─── Stripe Payment Endpoints ─────────────────────────────────────────────
+
+// In-memory payment records (keyed by Facebook access token / sessionId)
+// In production you'd use a database, but this works for MVP.
+const paidSessions = new Map(); // sessionId -> { paid: true, timestamp, stripeSessionId }
+const PAID_SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function prunePayments() {
+  const now = Date.now();
+  for (const [key, val] of paidSessions.entries()) {
+    if (now - val.timestamp > PAID_SESSION_TTL_MS) paidSessions.delete(key);
+  }
+}
+setInterval(prunePayments, 10 * 60 * 1000);
+
+// Create a Stripe Checkout Session
+app.post('/create-checkout-session', async (req, res) => {
+  if (!stripe) {
+    return res.status(500).json({ error: 'Stripe not configured on server.' });
+  }
+
+  const { sessionId: userSession, returnUrl } = req.body;
+  if (!userSession) {
+    return res.status(400).json({ error: 'Missing sessionId.' });
+  }
+
+  // Already paid?
+  if (paidSessions.has(userSession)) {
+    return res.json({ alreadyPaid: true });
+  }
+
+  try {
+    const checkoutSession = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: 'usd',
+          product_data: {
+            name: 'Heartbreak Sweeper — Photo Cleanup',
+            description: 'Unlock deletion & download for your matched photos (up to 1,500 photos)',
+          },
+          unit_amount: 499, // $4.99 in cents
+        },
+        quantity: 1,
+      }],
+      mode: 'payment',
+      success_url: `${returnUrl || 'https://heartbreaksweeper.com'}?payment=success&sid=${encodeURIComponent(userSession)}`,
+      cancel_url: `${returnUrl || 'https://heartbreaksweeper.com'}?payment=cancelled`,
+      metadata: {
+        userSession,
+      },
+    });
+
+    res.json({ url: checkoutSession.url, sessionId: checkoutSession.id });
+  } catch (err) {
+    console.error('Stripe checkout error:', err.message);
+    res.status(500).json({ error: 'Failed to create checkout session.' });
+  }
+});
+
+// Verify payment status
+app.post('/verify-payment', async (req, res) => {
+  const { sessionId: userSession } = req.body;
+  if (!userSession) {
+    return res.status(400).json({ error: 'Missing sessionId.' });
+  }
+
+  if (paidSessions.has(userSession)) {
+    return res.json({ paid: true });
+  }
+
+  return res.json({ paid: false });
+});
+
+// Record payment (called by frontend after successful Stripe redirect)
+app.post('/record-payment', async (req, res) => {
+  if (!stripe) {
+    return res.status(500).json({ error: 'Stripe not configured.' });
+  }
+
+  const { sessionId: userSession, stripeSessionId } = req.body;
+  if (!userSession || !stripeSessionId) {
+    return res.status(400).json({ error: 'Missing sessionId or stripeSessionId.' });
+  }
+
+  try {
+    // Verify with Stripe that the payment actually happened
+    const checkoutSession = await stripe.checkout.sessions.retrieve(stripeSessionId);
+
+    if (checkoutSession.payment_status === 'paid') {
+      paidSessions.set(userSession, {
+        paid: true,
+        timestamp: Date.now(),
+        stripeSessionId,
+      });
+      return res.json({ paid: true });
+    } else {
+      return res.json({ paid: false, reason: 'Payment not completed.' });
+    }
+  } catch (err) {
+    console.error('Stripe verify error:', err.message);
+    return res.status(500).json({ error: 'Failed to verify payment.' });
+  }
+});
+
+// ─── Startup Warnings ────────────────────────────────────────────────────
+
+// Stripe env var check
+if (!process.env.STRIPE_SECRET_KEY) {
+  console.warn('Warning: Missing STRIPE_SECRET_KEY. Payment endpoints will not work.');
+}
 
 // Facebook OAuth vars are validated in /auth/callback so the server can still boot for health checks.
 const requiredOauthEnv = ['FB_APP_ID', 'FB_APP_SECRET', 'FB_REDIRECT_URI'];
