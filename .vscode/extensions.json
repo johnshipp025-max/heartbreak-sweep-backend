@@ -1,0 +1,14 @@
+{
+  "recommendations": [
+    "ritwickdey.LiveServer",
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "eamodio.gitlens",
+    "humao.rest-client",
+    "rangav.vscode-thunder-client",
+    "ms-azuretools.vscode-docker",
+    "usernamehw.errorlens",
+    "GitHub.copilot",
+    "GitHub.copilot-chat"
+  ]
+}

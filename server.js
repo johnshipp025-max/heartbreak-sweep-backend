@@ -111,6 +111,60 @@ async function fetchFacebookPhotoSet(token, type) {
   return allPhotos;
 }
 
+// Fetch photos from user's own Facebook albums (catches photos that
+// don't appear in uploaded/tagged sets, e.g. album-only or shared posts)
+async function fetchFacebookAlbumPhotos(token) {
+  const allPhotos = [];
+  const seenIds = new Set();
+  const fields = 'images,created_time,from,tags.fields(name)';
+
+  // 1. Get list of user's albums
+  let albumsUrl = `https://graph.facebook.com/v18.0/me/albums?fields=id,name&limit=50&access_token=${encodeURIComponent(token)}`;
+  const albumIds = [];
+  try {
+    while (albumsUrl) {
+      const res = await axios.get(albumsUrl);
+      const data = res.data;
+      if (data.error) break;
+      (data.data || []).forEach(a => albumIds.push(a.id));
+      albumsUrl = data.paging?.next || null;
+    }
+  } catch (e) {
+    console.warn('fetchFacebookAlbumPhotos: could not list albums:', e.message);
+    return [];
+  }
+
+  console.log(`fetchFacebookAlbumPhotos: found ${albumIds.length} albums`);
+
+  // 2. For each album fetch its photos (up to 5 albums in parallel)
+  const ALBUM_CONCURRENCY = 5;
+  for (let i = 0; i < albumIds.length; i += ALBUM_CONCURRENCY) {
+    const chunk = albumIds.slice(i, i + ALBUM_CONCURRENCY);
+    await Promise.all(chunk.map(async (albumId) => {
+      let photoUrl = `https://graph.facebook.com/v18.0/${encodeURIComponent(albumId)}/photos?fields=${encodeURIComponent(fields)}&limit=100&access_token=${encodeURIComponent(token)}`;
+      try {
+        while (photoUrl) {
+          const res = await axios.get(photoUrl);
+          const data = res.data;
+          if (data.error) break;
+          for (const p of (data.data || [])) {
+            if (!seenIds.has(p.id)) {
+              seenIds.add(p.id);
+              allPhotos.push({ ...p, _type: 'uploaded' });
+            }
+          }
+          photoUrl = data.paging?.next || null;
+        }
+      } catch (e) {
+        console.warn(`fetchFacebookAlbumPhotos: album ${albumId} error:`, e.message);
+      }
+    }));
+  }
+
+  console.log(`fetchFacebookAlbumPhotos: found ${allPhotos.length} unique album photos`);
+  return allPhotos;
+}
+
 // Facebook OAuth callback (legacy, not really used by frontend)
 app.get('/auth/facebook/callback', async (req, res) => {
   const { code } = req.query;
@@ -489,7 +543,7 @@ app.post('/analyze', async (req, res) => {
 
     // 3. Smart screening: use FIRST ref photo to screen, then verify hits with remaining refs
     const PROCESSING_TIME_LIMIT_MS = 4 * 60 * 1000; // 4 minutes (Render allows 5 min max)
-    const BATCH_SIZE = 5; // Increased for paid tier (more RAM available)
+    const BATCH_SIZE = 10; // Higher batch = more parallel Rekognition calls
     const processingStartTime = Date.now();
     let timedOut = false;
     let firstInvalidParamLogged = false;
@@ -557,7 +611,7 @@ app.post('/analyze', async (req, res) => {
             .compareFaces({
               SourceImage: { Bytes: primaryRef },
               TargetImage: { Bytes: imgBuffer },
-              SimilarityThreshold: 20,
+              SimilarityThreshold: 60,
             })
             .promise();
 
@@ -589,7 +643,7 @@ app.post('/analyze', async (req, res) => {
                 .compareFaces({
                   SourceImage: { Bytes: refBuf },
                   TargetImage: { Bytes: imgBuffer },
-                  SimilarityThreshold: 20,
+                  SimilarityThreshold: 60,
                 })
                 .promise();
 
@@ -773,10 +827,12 @@ app.post('/scan/start', async (req, res) => {
     try {
       let uploadedPhotos = [];
       let taggedPhotos = [];
+      let albumPhotos = [];
       try {
-        [uploadedPhotos, taggedPhotos] = await Promise.all([
+        [uploadedPhotos, taggedPhotos, albumPhotos] = await Promise.all([
           fetchFacebookPhotoSet(token, 'uploaded'),
           fetchFacebookPhotoSet(token, 'tagged'),
+          fetchFacebookAlbumPhotos(token),
         ]);
       } catch (fbErr) {
         job.status = 'error';
@@ -785,12 +841,14 @@ app.post('/scan/start', async (req, res) => {
       }
 
       const allPhotosRaw = Array.from(
-        new Map([...uploadedPhotos, ...taggedPhotos].map(p => [p.id, p])).values()
+        new Map([...uploadedPhotos, ...taggedPhotos, ...albumPhotos].map(p => [p.id, p])).values()
       );
       const uploadedCount = uploadedPhotos.length;
       const taggedCount = taggedPhotos.length;
+      const albumCount = albumPhotos.length;
       uploadedPhotos = null;
       taggedPhotos = null;
+      albumPhotos = null;
 
       if (!allPhotosRaw.length) {
         job.status = 'done';
@@ -813,7 +871,9 @@ app.post('/scan/start', async (req, res) => {
       job.message = `Scanning ${allPhotos.length} photos...`;
 
       const normalizedTargetName = (targetName || '').trim().toLowerCase();
-      const BATCH_SIZE = 5;
+      const BATCH_SIZE = 10;
+      const primaryRef = refBuffers[0];
+      const secondaryRefs = refBuffers.slice(1);
       let comparedPhotos = 0;
       let skippedPhotos = 0;
       let compareErrors = 0;
@@ -854,8 +914,8 @@ app.post('/scan/start', async (req, res) => {
           let imgBuffer;
           try {
             imgBuffer = await sharp(imgRes.data)
-              .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
-              .jpeg({ quality: 85 })
+              .resize({ width: 1024, height: 1024, fit: 'inside', withoutEnlargement: true })
+              .jpeg({ quality: 82 })
               .toBuffer();
           } catch (convertErr) {
             skippedPhotos++;
@@ -880,23 +940,41 @@ app.post('/scan/start', async (req, res) => {
           comparedPhotos++;
           let bestSimilarity = 0;
 
-          // Compare against ALL reference photos for maximum accuracy
-          for (const refBuf of refBuffers) {
-            if (awsAuthError || permissionError) break;
-            try {
-              const rekRes = await rekognition.compareFaces({
-                SourceImage: { Bytes: refBuf },
-                TargetImage: { Bytes: imgBuffer },
-                SimilarityThreshold: 20,
-              }).promise();
-              for (const fm of (rekRes.FaceMatches || [])) {
-                if (fm.Similarity > bestSimilarity) bestSimilarity = fm.Similarity;
+          // Screen with primary ref first — only call secondary refs if primary gets a hit
+          try {
+            const primaryRes = await rekognition.compareFaces({
+              SourceImage: { Bytes: primaryRef },
+              TargetImage: { Bytes: imgBuffer },
+              SimilarityThreshold: 60,
+            }).promise();
+            for (const fm of (primaryRes.FaceMatches || [])) {
+              if (fm.Similarity > bestSimilarity) bestSimilarity = fm.Similarity;
+            }
+          } catch (cmpErr) {
+            compareErrors++;
+            if (cmpErr.code === 'InvalidParameterException' && /no face/i.test(cmpErr.message)) noFaceInTarget++;
+            if (isAwsAuthError(cmpErr)) { awsAuthError = cmpErr; return; }
+            if (isAwsPermissionError(cmpErr)) { permissionError = cmpErr; return; }
+          }
+
+          // Only verify with secondary refs if primary got a hit
+          if (bestSimilarity > 0 && secondaryRefs.length > 0) {
+            for (const refBuf of secondaryRefs) {
+              if (awsAuthError || permissionError) break;
+              try {
+                const rekRes = await rekognition.compareFaces({
+                  SourceImage: { Bytes: refBuf },
+                  TargetImage: { Bytes: imgBuffer },
+                  SimilarityThreshold: 60,
+                }).promise();
+                for (const fm of (rekRes.FaceMatches || [])) {
+                  if (fm.Similarity > bestSimilarity) bestSimilarity = fm.Similarity;
+                }
+              } catch (cmpErr) {
+                compareErrors++;
+                if (isAwsAuthError(cmpErr)) { awsAuthError = cmpErr; return; }
+                if (isAwsPermissionError(cmpErr)) { permissionError = cmpErr; return; }
               }
-            } catch (cmpErr) {
-              compareErrors++;
-              if (cmpErr.code === 'InvalidParameterException' && /no face/i.test(cmpErr.message)) noFaceInTarget++;
-              if (isAwsAuthError(cmpErr)) { awsAuthError = cmpErr; return; }
-              if (isAwsPermissionError(cmpErr)) { permissionError = cmpErr; return; }
             }
           }
 
@@ -946,6 +1024,7 @@ app.post('/scan/start', async (req, res) => {
         refPhotosUsed: refBuffers.length,
         uploadedPhotos: uploadedCount,
         taggedPhotos: taggedCount,
+        albumPhotos: albumCount,
         totalPhotos: job.totalPhotos,
         scannedPhotos: comparedPhotos,
         skippedPhotos,
@@ -1069,8 +1148,342 @@ app.post('/delete', async (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     status: 'Heartbreak Sweep API Running',
-    endpoints: ['/auth/callback', '/photos', '/analyze', '/scan/start', '/scan/status/:jobId', '/delete'],
+    endpoints: ['/auth/callback', '/auth/google/callback', '/photos', '/analyze', '/scan/start', '/scan/status/:jobId', '/scan/device', '/scan/google/start', '/delete'],
   });
+});
+
+// ─── Device Photo Scan ────────────────────────────────────────────────────
+// Accepts an array of base64 target photos from the browser, compares each
+// against the reference photo(s) using Rekognition, returns matched indices.
+app.post('/scan/device', async (req, res) => {
+  const { refPhotos: rawRefPhotos, refPhoto, targetPhotos } = req.body;
+
+  const rawRefs = Array.isArray(rawRefPhotos) && rawRefPhotos.length > 0
+    ? rawRefPhotos : refPhoto ? [refPhoto] : [];
+
+  if (!rawRefs.length) return res.status(400).json({ error: 'Missing reference photo(s).' });
+  if (!Array.isArray(targetPhotos) || !targetPhotos.length) return res.status(400).json({ error: 'Missing targetPhotos array.' });
+
+  // Build ref buffers
+  const refBuffers = [];
+  for (let i = 0; i < rawRefs.length; i++) {
+    const base64Data = rawRefs[i].split(',')[1];
+    if (!base64Data) return res.status(400).json({ error: `Reference photo #${i + 1} has invalid format.` });
+    let buf;
+    try { buf = await sharp(Buffer.from(base64Data, 'base64')).jpeg({ quality: 95 }).toBuffer(); }
+    catch (e) { return res.status(400).json({ error: `Reference photo #${i + 1} is not a valid image.` }); }
+    refBuffers.push(buf);
+  }
+
+  const primaryRef = refBuffers[0];
+  const secondaryRefs = refBuffers.slice(1);
+  const matches = [];
+
+  const isAwsAuthError = (err) => {
+    const msg = String(err?.message || '').toLowerCase();
+    return msg.includes('security token included in the request is invalid') || String(err?.code || '') === 'UnrecognizedClientException';
+  };
+
+  for (let idx = 0; idx < targetPhotos.length; idx++) {
+    const base64Data = targetPhotos[idx]?.split(',')[1];
+    if (!base64Data) continue;
+    let imgBuffer;
+    try {
+      imgBuffer = await sharp(Buffer.from(base64Data, 'base64'))
+        .resize({ width: 1024, height: 1024, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 82 }).toBuffer();
+    } catch (e) { continue; }
+    if (imgBuffer.length > 5 * 1024 * 1024) continue;
+
+    let bestSimilarity = 0;
+    try {
+      const res = await rekognition.compareFaces({
+        SourceImage: { Bytes: primaryRef },
+        TargetImage: { Bytes: imgBuffer },
+        SimilarityThreshold: 60,
+      }).promise();
+      for (const fm of (res.FaceMatches || [])) if (fm.Similarity > bestSimilarity) bestSimilarity = fm.Similarity;
+    } catch (cmpErr) {
+      if (isAwsAuthError(cmpErr)) return res.status(500).json({ error: 'AWS authentication failed.' });
+      continue;
+    }
+
+    if (bestSimilarity > 0 && secondaryRefs.length > 0) {
+      for (const refBuf of secondaryRefs) {
+        try {
+          const res = await rekognition.compareFaces({
+            SourceImage: { Bytes: refBuf },
+            TargetImage: { Bytes: imgBuffer },
+            SimilarityThreshold: 60,
+          }).promise();
+          for (const fm of (res.FaceMatches || [])) if (fm.Similarity > bestSimilarity) bestSimilarity = fm.Similarity;
+        } catch (e) {}
+      }
+    }
+
+    if (bestSimilarity > 0) matches.push({ index: idx, confidence: Math.round(bestSimilarity) });
+  }
+
+  matches.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+  res.json({ matches, total: targetPhotos.length });
+});
+
+// ─── Google Photos OAuth & Scan ───────────────────────────────────────────
+
+// Google OAuth redirect helper
+app.get('/auth/google', (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get('host')}/auth/google/callback`;
+  const frontendUrl = process.env.FRONTEND_UNIVERSAL_URL || process.env.FRONTEND_URL || 'https://heartbreaksweeper.com';
+
+  if (!clientId) {
+    return res.redirect(`${frontendUrl}?authError=google_not_configured&message=Google+OAuth+not+set+up+on+server`);
+  }
+
+  const scope = encodeURIComponent('https://www.googleapis.com/auth/photoslibrary.readonly');
+  const state = encodeURIComponent(req.query.state || '');
+  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}&access_type=offline&prompt=consent&state=${state}`;
+  res.redirect(url);
+});
+
+// Google OAuth callback
+app.get('/auth/google/callback', async (req, res) => {
+  const { code, error: oauthError } = req.query;
+  const frontendUrl = process.env.FRONTEND_UNIVERSAL_URL || process.env.FRONTEND_URL || 'https://heartbreaksweeper.com';
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get('host')}/auth/google/callback`;
+
+  if (oauthError) {
+    return res.redirect(`${frontendUrl}?authError=google_denied&message=${encodeURIComponent('Google access denied.')}`);
+  }
+  if (!code) {
+    return res.redirect(`${frontendUrl}?authError=google_no_code`);
+  }
+
+  try {
+    const tokenRes = await axios.post('https://oauth2.googleapis.com/token', null, {
+      params: {
+        code,
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+      },
+    });
+
+    const { access_token: accessToken } = tokenRes.data;
+    if (!accessToken) throw new Error('No access_token in Google token response');
+
+    // Redirect back to the universal frontend with the Google token
+    const redirectTarget = new URL(frontendUrl);
+    redirectTarget.searchParams.set('googleToken', accessToken);
+    redirectTarget.searchParams.set('platform', 'google');
+    res.redirect(redirectTarget.toString());
+  } catch (err) {
+    console.error('Google OAuth error:', err.response?.data || err.message);
+    res.redirect(`${frontendUrl}?authError=google_token_failed&message=${encodeURIComponent('Google authentication failed. Try again.')}`);
+  }
+});
+
+// Fetch all Google Photos media items (photos only, paged)
+async function fetchGooglePhotos(accessToken) {
+  const allPhotos = [];
+  let pageToken = null;
+
+  do {
+    const body = { pageSize: 100, filters: { mediaTypeFilter: { mediaTypes: ['PHOTO'] } } };
+    if (pageToken) body.pageToken = pageToken;
+
+    const res = await axios.post(
+      'https://photoslibrary.googleapis.com/v1/mediaItems:search',
+      body,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+
+    const items = res.data.mediaItems || [];
+    items.forEach(item => {
+      allPhotos.push({
+        id: item.id,
+        // Append =d to get the original download URL
+        bestImageSource: item.baseUrl + '=d',
+        created_time: item.mediaMetadata?.creationTime || null,
+        _type: 'uploaded',
+        tags: null,
+      });
+    });
+    pageToken = res.data.nextPageToken || null;
+  } while (pageToken);
+
+  console.log(`fetchGooglePhotos: found ${allPhotos.length} photos`);
+  return allPhotos;
+}
+
+// Background scan for Google Photos — same pattern as /scan/start
+app.post('/scan/google/start', async (req, res) => {
+  const { googleToken, refPhotos: rawRefPhotos, refPhoto } = req.body;
+
+  const rawPhotos = Array.isArray(rawRefPhotos) && rawRefPhotos.length > 0
+    ? rawRefPhotos : refPhoto ? [refPhoto] : [];
+
+  if (!googleToken || !rawPhotos.length) {
+    return res.status(400).json({ error: 'Missing googleToken or reference photo(s)' });
+  }
+
+  // Validate ref photos
+  const refBuffers = [];
+  for (let i = 0; i < rawPhotos.length; i++) {
+    const base64Data = rawPhotos[i].split(',')[1];
+    if (!base64Data) return res.status(400).json({ error: `Reference photo #${i + 1} has an invalid format.` });
+    const rawBuf = Buffer.from(base64Data, 'base64');
+    let buf;
+    try { buf = await sharp(rawBuf).jpeg({ quality: 95 }).toBuffer(); }
+    catch (e) { return res.status(400).json({ error: `Reference photo #${i + 1} is not a valid image.` }); }
+    if (buf.length > 5 * 1024 * 1024) return res.status(400).json({ error: `Reference photo #${i + 1} is too large. Max 5 MB.` });
+    try {
+      const detectRes = await rekognition.detectFaces({ Image: { Bytes: buf }, Attributes: ['DEFAULT'] }).promise();
+      if ((detectRes.FaceDetails || []).length === 0)
+        return res.status(400).json({ error: `No face detected in reference photo #${i + 1}. Upload a clear, front-facing photo.` });
+    } catch (detectErr) {
+      return res.status(500).json({ error: `Could not validate reference photo #${i + 1}.`, details: detectErr.message });
+    }
+    refBuffers.push(buf);
+  }
+
+  pruneJobs();
+  const jobId = generateJobId();
+  const job = {
+    createdAt: Date.now(), status: 'running', phase: 'fetching',
+    totalPhotos: 0, scannedPhotos: 0, matchCount: 0, matches: [],
+    message: 'Fetching photos from Google Photos...', error: null, diagnostics: null,
+  };
+  scanJobs.set(jobId, job);
+  res.json({ jobId });
+
+  // Background processing
+  (async () => {
+    try {
+      let allPhotos;
+      try {
+        allPhotos = await fetchGooglePhotos(googleToken);
+      } catch (err) {
+        job.status = 'error';
+        job.error = 'Google Photos API error: ' + (err.response?.data?.error?.message || err.message);
+        return;
+      }
+
+      if (!allPhotos.length) {
+        job.status = 'done';
+        job.message = 'Google Photos returned 0 accessible photos.';
+        job.diagnostics = { refPhotosUsed: refBuffers.length, totalPhotos: 0, scannedPhotos: 0 };
+        return;
+      }
+
+      job.totalPhotos = allPhotos.length;
+      job.phase = 'scanning';
+      job.message = `Scanning ${allPhotos.length} Google Photos...`;
+
+      const primaryRef = refBuffers[0];
+      const secondaryRefs = refBuffers.slice(1);
+      const BATCH_SIZE = 10;
+      let comparedPhotos = 0, skippedPhotos = 0, compareErrors = 0, noFaceInTarget = 0;
+      let awsAuthError = null, permissionError = null;
+
+      const isAwsAuthError = (err) => {
+        const msg = String(err?.message || '').toLowerCase();
+        const code = String(err?.code || '').toLowerCase();
+        return msg.includes('security token included in the request is invalid') || code === 'unrecognizedclientexception';
+      };
+      const isAwsPermissionError = (err) => {
+        const code = String(err?.code || '').toLowerCase();
+        return code === 'accessdeniedexception' || String(err?.message || '').toLowerCase().includes('is not authorized');
+      };
+
+      const processPhoto = async (photo) => {
+        if (awsAuthError || permissionError) return;
+        if (!photo.bestImageSource) { skippedPhotos++; return; }
+        try {
+          const imgRes = await axios.get(photo.bestImageSource, {
+            responseType: 'arraybuffer', timeout: 15000, headers: { Accept: 'image/*' },
+          });
+          let imgBuffer;
+          try {
+            imgBuffer = await sharp(imgRes.data)
+              .resize({ width: 1024, height: 1024, fit: 'inside', withoutEnlargement: true })
+              .jpeg({ quality: 82 }).toBuffer();
+          } catch (e) { skippedPhotos++; return; }
+
+          if (imgBuffer.length > 5 * 1024 * 1024) { skippedPhotos++; return; }
+
+          comparedPhotos++;
+          let bestSimilarity = 0;
+
+          try {
+            const res = await rekognition.compareFaces({
+              SourceImage: { Bytes: primaryRef },
+              TargetImage: { Bytes: imgBuffer },
+              SimilarityThreshold: 60,
+            }).promise();
+            for (const fm of (res.FaceMatches || [])) {
+              if (fm.Similarity > bestSimilarity) bestSimilarity = fm.Similarity;
+            }
+          } catch (cmpErr) {
+            compareErrors++;
+            if (cmpErr.code === 'InvalidParameterException' && /no face/i.test(cmpErr.message)) noFaceInTarget++;
+            if (isAwsAuthError(cmpErr)) { awsAuthError = cmpErr; return; }
+            if (isAwsPermissionError(cmpErr)) { permissionError = cmpErr; return; }
+          }
+
+          if (bestSimilarity > 0 && secondaryRefs.length > 0) {
+            for (const refBuf of secondaryRefs) {
+              if (awsAuthError || permissionError) break;
+              try {
+                const res = await rekognition.compareFaces({
+                  SourceImage: { Bytes: refBuf },
+                  TargetImage: { Bytes: imgBuffer },
+                  SimilarityThreshold: 60,
+                }).promise();
+                for (const fm of (res.FaceMatches || [])) {
+                  if (fm.Similarity > bestSimilarity) bestSimilarity = fm.Similarity;
+                }
+              } catch (cmpErr) {
+                compareErrors++;
+                if (isAwsAuthError(cmpErr)) { awsAuthError = cmpErr; return; }
+                if (isAwsPermissionError(cmpErr)) { permissionError = cmpErr; return; }
+              }
+            }
+          }
+
+          if (bestSimilarity > 0) {
+            job.matches.push({ id: photo.id, url: photo.bestImageSource, confidence: Math.round(bestSimilarity), date: photo.created_time, owned: true, matchType: 'face' });
+            job.matchCount = job.matches.length;
+          }
+        } catch (err) {
+          skippedPhotos++;
+          if (isAwsAuthError(err)) awsAuthError = err;
+        }
+      };
+
+      for (let i = 0; i < allPhotos.length; i += BATCH_SIZE) {
+        if (awsAuthError || permissionError) break;
+        await Promise.all(allPhotos.slice(i, i + BATCH_SIZE).map(processPhoto));
+        job.scannedPhotos = comparedPhotos + skippedPhotos;
+        job.message = `Scanned ${job.scannedPhotos} of ${job.totalPhotos} Google Photos (${job.matchCount} matches so far)...`;
+      }
+
+      if (awsAuthError) { job.status = 'error'; job.error = 'AWS authentication failed.'; return; }
+      if (permissionError) { job.status = 'error'; job.error = 'AWS permission denied.'; return; }
+
+      job.matches.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+      job.status = 'done';
+      job.scannedPhotos = comparedPhotos + skippedPhotos;
+      job.message = `Scanned all ${job.totalPhotos} Google Photos using ${refBuffers.length} reference(s). Found ${job.matches.length} match(es).`;
+      job.diagnostics = { refPhotosUsed: refBuffers.length, totalPhotos: job.totalPhotos, scannedPhotos: comparedPhotos, skippedPhotos, compareErrors, noFaceInTarget };
+      console.log(`Google scan job ${jobId} complete: ${job.matches.length} matches in ${job.totalPhotos} photos`);
+    } catch (err) {
+      console.error(`Google scan job ${jobId} fatal error:`, err.message);
+      job.status = 'error';
+      job.error = err.message;
+    }
+  })();
 });
 
 // ─── Stripe Payment Endpoints ─────────────────────────────────────────────
