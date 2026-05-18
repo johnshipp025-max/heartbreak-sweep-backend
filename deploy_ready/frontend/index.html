@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width,initial-scale=1">
+	<title>Heartbreak Sweeper — Make tomorrow cleaner</title>
+	<link rel="icon" href="logo.png">
+	<style>
+		:root{--bg:#070509;--card:#12080a;--accent:#e62a1d;--muted:#9b8b8b}
+		html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:#fff}
+		.wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:48px}
+		.hero{width:100%;max-width:1400px;display:grid;grid-template-columns:1fr 480px;gap:40px;align-items:center}
+		.left{padding:24px}
+		.logo{width:140px;border-radius:20px;box-shadow:0 10px 40px rgba(230,42,29,0.18)}
+		.eyebrow{color:var(--muted);text-transform:uppercase;letter-spacing:2px;font-weight:700;font-size:12px}
+		h1{font-size:clamp(46px,7vw,110px);margin:14px 0 6px;line-height:0.9;color:var(--accent);text-transform:uppercase;letter-spacing:-2px}
+		p.lead{color:#ddd;font-size:18px;max-width:720px}
+		.cta{margin-top:22px}
+		.btn{display:inline-block;padding:14px 22px;border-radius:12px;font-weight:800;text-decoration:none;cursor:pointer}
+		.btn.primary{background:var(--accent);color:#fff;border:0}
+		.btn.ghost{background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.06);margin-left:12px}
+		.right{background:linear-gradient(180deg,rgba(24,8,10,0.6),rgba(8,4,5,0.6));padding:28px;border-radius:20px;border:1px solid rgba(128,30,30,0.12);box-shadow:0 30px 80px rgba(0,0,0,0.6)}
+		.card-title{font-size:20px;margin:6px 0 14px}
+		.features{display:flex;flex-direction:column;gap:12px}
+		.feature{display:flex;gap:12px;align-items:flex-start}
+		.feature b{color:#fff}
+		footer{margin-top:34px;color:var(--muted);font-size:13px;text-align:center}
+		@media(max-width:1000px){.hero{grid-template-columns:1fr;}.right{order:2}}
+	</style>
+</head>
+<body>
+	<main class="wrap">
+		<section class="hero">
+			<div class="left">
+				<img src="logo.png" class="logo" alt="Heartbreak Sweeper logo">
+				<div class="eyebrow">AI Photo Cleanup for Moving Forward</div>
+				<h1>Heartbreak Sweeper</h1>
+				<p class="lead">Find painful old photos faster, review every match yourself, then download, untag, or remove the ones you choose. You stay in control — we never take action without your permission.</p>
+				<div class="cta">
+					<a class="btn primary" href="https://heartbreak-sweep-backend.onrender.com/auth/facebook/start">Continue with Facebook</a>
+					<a class="btn ghost" href="#how">See How It Works</a>
+				</div>
+			</div>
+			<aside class="right">
+				<div style="display:flex;align-items:center;gap:12px">
+					<img src="logo.png" style="width:64px;border-radius:12px" alt="logo">
+					<div>
+						<div class="card-title">Make tomorrow cleaner than yesterday.</div>
+						<div style="color:var(--muted);font-size:14px">Upload reference photos, connect supported sources, let AI surface likely matches, and approve any action before anything changes.</div>
+					</div>
+				</div>
+				<div class="features" style="margin-top:18px">
+					<div class="feature"><div style="width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:6px"></div><div><b>Private by design</b><div style="color:var(--muted)">Temporary processing, minimal retention.</div></div></div>
+					<div class="feature"><div style="width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:6px"></div><div><b>User approved</b><div style="color:var(--muted)">No automatic deletion without confirmation.</div></div></div>
+					<div class="feature"><div style="width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:6px"></div><div><b>Built to submit</b><div style="color:var(--muted)">Privacy, deletion, payment, and platform disclosures included.</div></div></div>
+				</div>
+				<footer>
+					<a href="privacy.html" style="color:var(--muted);text-decoration:none;margin-right:12px">Privacy</a>
+					<a href="terms.html" style="color:var(--muted);text-decoration:none;margin-right:12px">Terms</a>
+					<a href="delete_data.html" style="color:var(--muted);text-decoration:none">Delete Data</a>
+				</footer>
+			</aside>
+		</section>
+	</main>
+	<script>window.HBS_API_BASE='https://heartbreak-sweep-backend.onrender.com';</script>
+</body>
+</html>
