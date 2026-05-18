@@ -1,67 +1,2005 @@
-<!doctype html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width,initial-scale=1">
-	<title>Heartbreak Sweeper — Make tomorrow cleaner</title>
-	<link rel="icon" href="logo.png">
-	<style>
-		:root{--bg:#070509;--card:#12080a;--accent:#e62a1d;--muted:#9b8b8b}
-		html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:#fff}
-		.wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:48px}
-		.hero{width:100%;max-width:1400px;display:grid;grid-template-columns:1fr 480px;gap:40px;align-items:center}
-		.left{padding:24px}
-		.logo{width:140px;border-radius:20px;box-shadow:0 10px 40px rgba(230,42,29,0.18)}
-		.eyebrow{color:var(--muted);text-transform:uppercase;letter-spacing:2px;font-weight:700;font-size:12px}
-		h1{font-size:clamp(46px,7vw,110px);margin:14px 0 6px;line-height:0.9;color:var(--accent);text-transform:uppercase;letter-spacing:-2px}
-		p.lead{color:#ddd;font-size:18px;max-width:720px}
-		.cta{margin-top:22px}
-		.btn{display:inline-block;padding:14px 22px;border-radius:12px;font-weight:800;text-decoration:none;cursor:pointer}
-		.btn.primary{background:var(--accent);color:#fff;border:0}
-		.btn.ghost{background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.06);margin-left:12px}
-		.right{background:linear-gradient(180deg,rgba(24,8,10,0.6),rgba(8,4,5,0.6));padding:28px;border-radius:20px;border:1px solid rgba(128,30,30,0.12);box-shadow:0 30px 80px rgba(0,0,0,0.6)}
-		.card-title{font-size:20px;margin:6px 0 14px}
-		.features{display:flex;flex-direction:column;gap:12px}
-		.feature{display:flex;gap:12px;align-items:flex-start}
-		.feature b{color:#fff}
-		footer{margin-top:34px;color:var(--muted);font-size:13px;text-align:center}
-		@media(max-width:1000px){.hero{grid-template-columns:1fr;}.right{order:2}}
-	</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Heartbreak Sweeper - AI Photo Finder</title>
+    <link rel="icon" type="image/png" href="logo.png">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;600;700&display=swap');
+
+        * { box-sizing: border-box; }
+        body { 
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            background: #090610;
+            color: #e8e8e8; 
+            margin: 0;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: 
+                radial-gradient(ellipse at 20% 50%, rgba(190, 40, 40, 0.05) 0%, transparent 60%),
+                radial-gradient(ellipse at 80% 20%, rgba(150, 30, 30, 0.03) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 100%, rgba(200, 50, 50, 0.03) 0%, transparent 40%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; position: relative; z-index: 1; }
+        
+        /* Floating hearts background */
+        .hearts-bg {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 0;
+            overflow: hidden;
+        }
+        .hearts-bg .heart {
+            position: absolute;
+            opacity: 0;
+            color: #d44848;
+            font-size: 14px;
+            animation: floatHeart linear infinite;
+        }
+        @keyframes floatHeart {
+            0% { transform: translateY(100vh) rotate(0deg); opacity: 0; }
+            10% { opacity: 0.09; }
+            90% { opacity: 0.09; }
+            100% { transform: translateY(-10vh) rotate(360deg); opacity: 0; }
+        }
+
+        header { 
+            background: linear-gradient(180deg, rgba(190,40,40,0.07) 0%, rgba(0,0,0,0) 100%);
+            padding: 28px 20px 20px;
+            text-align: center;
+            border-bottom: 1px solid rgba(200,30,30,0.3);
+            position: relative;
+        }
+        header::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 10%; right: 10%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(220,40,40,0.6), transparent);
+        }
+        .header-logo {
+            width: 64px;
+            height: 64px;
+            border-radius: 16px;
+            margin-bottom: 8px;
+            filter: drop-shadow(0 0 20px rgba(200,30,30,0.4));
+        }
+        h1 { 
+            font-family: 'Bebas Neue', Impact, sans-serif;
+            color: #dc2828;
+            margin: 0; 
+            font-size: 3rem; 
+            letter-spacing: 4px;
+            text-shadow: 0 0 28px rgba(210,50,50,0.25), 0 2px 4px rgba(0,0,0,0.4);
+            line-height: 1;
+        }
+        header p {
+            color: rgba(255,255,255,0.45);
+            font-size: 14px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin: 8px 0 0;
+        }
+        .tagline {
+            color: rgba(200,30,30,0.7);
+            font-style: italic;
+            font-size: 13px;
+            margin-top: 4px;
+        }
+
+        .step { 
+            background: rgba(255,255,255,0.03); 
+            border-radius: 16px; 
+            padding: 30px; 
+            margin: 20px 0;
+            border: 1px solid rgba(200,30,30,0.15);
+            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
+            position: relative;
+        }
+        .step h2 {
+            font-family: 'Bebas Neue', Impact, sans-serif;
+            letter-spacing: 2px;
+            font-size: 1.5rem;
+            color: #e04040;
+        }
+
+        .btn { 
+            background: linear-gradient(135deg, #cc1a1a 0%, #8b0000 100%);
+            color: white; 
+            padding: 14px 36px; 
+            border: none; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-size: 16px;
+            font-weight: 700;
+            transition: all 0.3s;
+            display: inline-block;
+            margin: 8px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            box-shadow: 0 4px 15px rgba(180,20,20,0.3);
+        }
+        .btn:hover { 
+            background: linear-gradient(135deg, #e02020 0%, #a00000 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 25px rgba(200,30,30,0.5);
+        }
+        .btn:disabled { background: #333; cursor: not-allowed; box-shadow: none; color: #666; }
+        input[type="file"] { 
+            display: block; 
+            margin: 20px auto; 
+            padding: 15px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
+            border: 2px dashed rgba(200,30,30,0.4);
+            color: white;
+            cursor: pointer;
+        }
+        .photo-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); 
+            gap: 15px; 
+            margin: 20px 0;
+        }
+        .photo-card { 
+            position: relative; 
+            border-radius: 10px; 
+            overflow: hidden;
+            cursor: pointer;
+            transition: transform 0.3s, box-shadow 0.3s;
+            border: 2px solid rgba(255,255,255,0.08);
+            background: #111;
+        }
+        .photo-card:hover { transform: scale(1.04); box-shadow: 0 8px 30px rgba(0,0,0,0.5); }
+        .photo-card.selected { border-color: #00ff00; box-shadow: 0 0 15px rgba(0,255,0,0.3); }
+        .photo-card.match { border-color: #cc1a1a; box-shadow: 0 0 20px rgba(200,30,30,0.4); }
+        .photo-card.selected.match { border-color: #00ff00; }
+        .photo-card img { width: 100%; height: 200px; object-fit: cover; display: block; cursor: pointer; }
+        .photo-card .check-overlay {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.5);
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            transition: all 0.2s;
+            pointer-events: none;
+        }
+        .photo-card.selected .check-overlay {
+            background: #00ff00;
+            border-color: #00ff00;
+            color: #000;
+        }
+        .match-badge { 
+            position: absolute; 
+            top: 10px; 
+            right: 10px; 
+            background: rgba(200,30,30,0.9);
+            color: white; 
+            padding: 4px 10px; 
+            border-radius: 6px; 
+            font-weight: bold;
+            font-size: 13px;
+            -webkit-backdrop-filter: blur(4px);
+            backdrop-filter: blur(4px);
+        }
+        #status { 
+            background: rgba(200,30,30,0.08);
+            border: 1px solid rgba(200,30,30,0.2);
+            padding: 16px 20px; 
+            border-radius: 10px; 
+            margin: 20px 0;
+            text-align: center;
+            font-size: 16px;
+            color: #ccc;
+        }
+        .progress-bar { 
+            width: 100%; 
+            height: 6px; 
+            background: rgba(255,255,255,0.08); 
+            border-radius: 3px; 
+            overflow: hidden;
+            margin: 20px 0;
+        }
+        .progress-fill { 
+            height: 100%; 
+            background: linear-gradient(90deg, #8b0000, #cc1a1a, #e04040);
+            width: 0%;
+            transition: width 0.3s;
+            border-radius: 3px;
+            box-shadow: 0 0 10px rgba(200,30,30,0.5);
+        }
+        .hidden { display: none !important; }
+        .stats { 
+            display: grid; 
+            grid-template-columns: repeat(3, 1fr); 
+            gap: 15px; 
+            margin: 20px 0;
+        }
+        .stat-box { 
+            background: rgba(200,30,30,0.08);
+            border: 1px solid rgba(200,30,30,0.2);
+            padding: 20px; 
+            border-radius: 12px; 
+            text-align: center;
+        }
+        .stat-number { 
+            font-family: 'Bebas Neue', Impact, sans-serif;
+            font-size: 42px; 
+            font-weight: bold; 
+            color: #dc2828;
+            text-shadow: 0 0 20px rgba(200,30,30,0.3);
+        }
+        .stat-box > div:last-child {
+            color: rgba(255,255,255,0.5);
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 4px;
+        }
+        .delete-btn {
+            background: linear-gradient(135deg, #cc1a1a, #8b0000);
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            z-index: 1000;
+            box-shadow: 0 5px 20px rgba(200,30,30,0.4);
+        }
+        .type-badge {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.75);
+            color: rgba(255,255,255,0.6);
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            -webkit-backdrop-filter: blur(4px);
+            backdrop-filter: blur(4px);
+        }
+        .action-bar {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin: 15px 0;
+        }
+        .action-bar .btn { padding: 10px 20px; font-size: 13px; }
+        .select-hint {
+            text-align: center;
+            color: #e04040;
+            font-size: 15px;
+            font-weight: 600;
+            margin: 10px 0;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+        /* Landing page (Step 1) — cinematic hero */
+        #step1 {
+            background: none;
+            border: none;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+            border-radius: 0;
+            padding: 60px 30px 80px;
+            margin: 0 -20px;
+            min-height: 88vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        #step1::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(ellipse at 35% 55%, rgba(200,50,50,0.14) 0%, transparent 55%),
+                radial-gradient(ellipse at 72% 25%, rgba(160,30,30,0.08) 0%, transparent 45%),
+                radial-gradient(ellipse at 50% 90%, rgba(210,60,60,0.06) 0%, transparent 40%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        #step1 > * { position: relative; z-index: 1; }
+
+        .hero-icon-area {
+            position: relative;
+            width: 150px;
+            height: 120px;
+            margin: 0 auto 22px;
+        }
+        .hero-heart-icon {
+            font-size: 92px;
+            line-height: 1;
+            display: block;
+            filter: drop-shadow(0 0 30px rgba(200,30,30,0.75)) drop-shadow(0 0 60px rgba(200,30,30,0.3));
+            animation: heroHeartbeat 2s ease-in-out infinite;
+        }
+        .hero-broom-icon {
+            font-size: 46px;
+            position: absolute;
+            bottom: -6px;
+            right: -16px;
+            transform: rotate(-40deg);
+            filter: drop-shadow(0 0 10px rgba(180,90,10,0.55));
+            animation: broomSweep 2.4s ease-in-out infinite;
+        }
+        @keyframes heroHeartbeat {
+            0%,100% { transform: scale(1); }
+            15% { transform: scale(1.12); }
+            30% { transform: scale(1); }
+            45% { transform: scale(1.07); }
+        }
+        @keyframes broomSweep {
+            0%,100% { transform: rotate(-40deg) translateX(0); }
+            50% { transform: rotate(-40deg) translateX(9px); }
+        }
+        .hero-headline {
+            font-family: 'Bebas Neue', Impact, sans-serif;
+            font-size: clamp(2.8rem, 10vw, 5.8rem);
+            line-height: 1.0;
+            color: #ff4444;
+            text-shadow: 0 0 36px rgba(220,55,55,0.35), 0 3px 8px rgba(0,0,0,0.60);
+            letter-spacing: 2px;
+            margin: 0 0 10px;
+        }
+        .hero-headline em {
+            font-style: normal;
+            color: #fff;
+        }
+        .hero-sub {
+            font-size: clamp(1rem, 3vw, 1.35rem);
+            color: rgba(255,255,255,0.75);
+            margin: 0 0 26px;
+            font-weight: 400;
+            letter-spacing: 0.5px;
+        }
+        .hero-description {
+            max-width: 540px;
+            font-size: 15px;
+            line-height: 1.78;
+            color: rgba(255,255,255,0.58);
+            margin: 0 auto 30px;
+        }
+        .hero-quote-container {
+            max-width: 480px;
+            min-height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 28px;
+        }
+        .hero-quote {
+            font-size: 15px;
+            font-style: italic;
+            color: rgba(255,255,255,0.58);
+            line-height: 1.6;
+            transition: opacity 0.8s ease;
+            opacity: 1;
+        }
+        .hero-quote.fading { opacity: 0; }
+        .hero-quote-author {
+            font-size: 12px;
+            color: rgba(200,30,30,0.55);
+            margin-top: 4px;
+            font-style: normal;
+            transition: opacity 0.8s ease;
+            opacity: 1;
+        }
+        .hero-quote-author.fading { opacity: 0; }
+        .hero-cta-btn {
+            background: linear-gradient(135deg, #cc1a1a 0%, #8b0000 100%);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-family: 'Bebas Neue', Impact, sans-serif;
+            font-size: clamp(1.15rem, 4vw, 1.45rem);
+            font-weight: 400;
+            letter-spacing: 2px;
+            padding: 18px 56px;
+            cursor: pointer;
+            text-transform: uppercase;
+            box-shadow: 0 6px 28px rgba(210,50,50,0.38), 0 2px 6px rgba(0,0,0,0.4);
+            transition: all 0.3s;
+            display: inline-block;
+            margin-bottom: 14px;
+        }
+        .hero-cta-btn:hover {
+            background: linear-gradient(135deg, #e02020 0%, #a00000 100%);
+            transform: translateY(-3px);
+            box-shadow: 0 12px 38px rgba(220,55,55,0.50);
+        }
+        .hero-cta-btn:disabled {
+            background: #333;
+            cursor: not-allowed;
+            box-shadow: none;
+            color: #555;
+            transform: none;
+        }
+        .hero-buttons {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            margin-top: 4px;
+        }
+        .hero-trust {
+            font-size: 11px;
+            color: rgba(255,255,255,0.28);
+            margin-top: 14px;
+            letter-spacing: 0.8px;
+        }
+
+        /* Scan screen with branding background */
+        #step3 {
+            background: 
+                linear-gradient(180deg, rgba(8,5,10,0.55) 0%, rgba(8,5,10,0.28) 40%, rgba(8,5,10,0.62) 100%),
+                url('logo.png') center center / cover no-repeat;
+            border-color: rgba(200,30,30,0.25);
+            min-height: 300px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+        #step3 h2 {
+            text-shadow: 0 0 30px rgba(200,30,30,0.5);
+        }
+        #step3 #scanStatus {
+            font-size: 16px;
+            color: rgba(255,255,255,0.7);
+            margin-top: 10px;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255,255,255,0.2);
+            border-radius: 50%;
+            border-top-color: #dc2828;
+            animation: spin 0.8s ease-in-out infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Scan heartbeat animation */
+        .scan-heartbeat {
+            display: inline-block;
+            animation: heartbeat 1.2s ease-in-out infinite;
+            font-size: 48px;
+            margin-bottom: 10px;
+            filter: drop-shadow(0 0 15px rgba(200,30,30,0.6));
+        }
+        @keyframes heartbeat {
+            0%, 100% { transform: scale(1); }
+            14% { transform: scale(1.15); }
+            28% { transform: scale(1); }
+            42% { transform: scale(1.1); }
+            56% { transform: scale(1); }
+        }
+
+        /* Healing quotes */
+        .quote-container {
+            margin: 24px auto 10px;
+            max-width: 520px;
+            min-height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+        .quote-text {
+            font-size: 17px;
+            font-style: italic;
+            color: rgba(255,255,255,0.75);
+            line-height: 1.6;
+            transition: opacity 0.8s ease;
+            opacity: 1;
+        }
+        .quote-text.fading { opacity: 0; }
+        .quote-author {
+            font-size: 13px;
+            color: rgba(200,30,30,0.6);
+            margin-top: 6px;
+            font-style: normal;
+        }
+
+        /* Scan screen carousel */
+        .scan-carousel-wrapper {
+            width: 100%;
+            max-width: 640px;
+            margin: 22px auto 6px;
+            position: relative;
+            height: 152px;
+            border-radius: 14px;
+            overflow: hidden;
+        }
+        .scan-slide {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            padding: 20px 28px;
+            border-radius: 14px;
+            opacity: 0;
+            transition: opacity 1s ease;
+            pointer-events: none;
+        }
+        .scan-slide.active { opacity: 1; pointer-events: auto; }
+        .scan-slide:nth-child(1) {
+            background: linear-gradient(135deg, rgba(120,8,8,0.6) 0%, rgba(20,0,0,0.8) 100%);
+            border: 1px solid rgba(200,30,30,0.3);
+        }
+        .scan-slide:nth-child(2) {
+            background: linear-gradient(135deg, rgba(60,15,15,0.6) 0%, rgba(15,5,5,0.85) 100%);
+            border: 1px solid rgba(140,20,20,0.25);
+        }
+        .scan-slide:nth-child(3) {
+            background: linear-gradient(135deg, rgba(8,16,65,0.6) 0%, rgba(3,6,32,0.85) 100%);
+            border: 1px solid rgba(30,60,160,0.3);
+        }
+        .scan-slide:nth-child(4) {
+            background: linear-gradient(135deg, rgba(90,8,8,0.6) 0%, rgba(20,0,0,0.85) 100%);
+            border: 1px solid rgba(180,20,20,0.25);
+        }
+        .scan-slide-inner {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            text-align: left;
+        }
+        .scan-slide-emoji {
+            font-size: 54px;
+            flex-shrink: 0;
+            filter: drop-shadow(0 0 14px rgba(200,30,30,0.55));
+        }
+        .scan-slide:nth-child(3) .scan-slide-emoji {
+            filter: drop-shadow(0 0 14px rgba(60,100,220,0.55));
+        }
+        .scan-slide-title {
+            font-family: 'Bebas Neue', Impact, sans-serif;
+            font-size: clamp(1.15rem, 4vw, 1.6rem);
+            color: #fff;
+            letter-spacing: 1.5px;
+            line-height: 1.1;
+            text-shadow: 0 0 20px rgba(200,30,30,0.4);
+        }
+        .scan-slide:nth-child(3) .scan-slide-title {
+            text-shadow: 0 0 20px rgba(60,100,220,0.45);
+        }
+        .scan-slide-sub {
+            font-size: 13px;
+            color: rgba(255,255,255,0.52);
+            margin-top: 5px;
+            font-style: italic;
+            letter-spacing: 0.3px;
+        }
+        .scan-slide-brand {
+            font-size: 10px;
+            color: rgba(200,30,30,0.7);
+            text-transform: uppercase;
+            letter-spacing: 2.5px;
+            margin-top: 8px;
+            font-weight: 600;
+        }
+        .scan-slide:nth-child(3) .scan-slide-brand { color: rgba(80,120,220,0.75); }
+
+        /* Affiliate / ad banner */
+        .sponsor-banner {
+            margin: 20px auto;
+            max-width: 600px;
+            padding: 16px 20px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 10px;
+            text-align: center;
+            font-size: 13px;
+            color: rgba(255,255,255,0.5);
+        }
+        .sponsor-banner a {
+            color: #e04040;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .sponsor-banner a:hover {
+            text-decoration: underline;
+            color: #ff4444;
+        }
+        .sponsor-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: rgba(255,255,255,0.25);
+            margin-bottom: 6px;
+        }
+    </style>
 </head>
 <body>
-	<main class="wrap">
-		<section class="hero">
-			<div class="left">
-				<img src="logo.png" class="logo" alt="Heartbreak Sweeper logo">
-				<div class="eyebrow">AI Photo Cleanup for Moving Forward</div>
-				<h1>Heartbreak Sweeper</h1>
-				<p class="lead">Find painful old photos faster, review every match yourself, then download, untag, or remove the ones you choose. You stay in control — we never take action without your permission.</p>
-				<div class="cta">
-					<a class="btn primary" href="https://heartbreak-sweep-backend.onrender.com/auth/facebook/start">Continue with Facebook</a>
-					<a class="btn ghost" href="#how">See How It Works</a>
-				</div>
-			</div>
-			<aside class="right">
-				<div style="display:flex;align-items:center;gap:12px">
-					<img src="logo.png" style="width:64px;border-radius:12px" alt="logo">
-					<div>
-						<div class="card-title">Make tomorrow cleaner than yesterday.</div>
-						<div style="color:var(--muted);font-size:14px">Upload reference photos, connect supported sources, let AI surface likely matches, and approve any action before anything changes.</div>
-					</div>
-				</div>
-				<div class="features" style="margin-top:18px">
-					<div class="feature"><div style="width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:6px"></div><div><b>Private by design</b><div style="color:var(--muted)">Temporary processing, minimal retention.</div></div></div>
-					<div class="feature"><div style="width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:6px"></div><div><b>User approved</b><div style="color:var(--muted)">No automatic deletion without confirmation.</div></div></div>
-					<div class="feature"><div style="width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:6px"></div><div><b>Built to submit</b><div style="color:var(--muted)">Privacy, deletion, payment, and platform disclosures included.</div></div></div>
-				</div>
-				<footer>
-					<a href="privacy.html" style="color:var(--muted);text-decoration:none;margin-right:12px">Privacy</a>
-					<a href="terms.html" style="color:var(--muted);text-decoration:none;margin-right:12px">Terms</a>
-					<a href="delete_data.html" style="color:var(--muted);text-decoration:none">Delete Data</a>
-				</footer>
-			</aside>
-		</section>
-	</main>
-	<script>window.HBS_API_BASE='https://heartbreak-sweep-backend.onrender.com';</script>
+    <!-- Floating hearts background -->
+    <div class="hearts-bg" id="heartsBg"></div>
+
+    <div class="container">
+        <header>
+            <img src="logo.png" alt="Heartbreak Sweeper" class="header-logo">
+            <h1>HEARTBREAK SWEEPER</h1>
+            <p>AI-Powered Photo Detection & Removal</p>
+            <div class="tagline">Erase the past. Move forward.</div>
+        </header>
+
+        <!-- Step 1: Landing / Connect -->
+        <div class="step" id="step1">
+            <div class="hero-icon-area">
+                <span class="hero-heart-icon">💔</span>
+                <span class="hero-broom-icon">🧹</span>
+            </div>
+
+            <div class="hero-headline">Tomorrow should reflect <em>who you are becoming</em><br>— not what hurt you yesterday.</div>
+            <div class="hero-sub">Your profile. Your terms. Get it done.</div>
+
+            <p class="hero-description">
+                Heartbreak Sweeper uses AI to scan your connected accounts and locate photos associated with people in your digital history.
+                Review them in one place, organize what belongs, and manage the rest — privately, and on your terms.
+            </p>
+
+            <div class="hero-quote-container">
+                <div>
+                    <div class="hero-quote" id="heroQuote">"You're not deleting memories. You're making room for new ones."</div>
+                    <div class="hero-quote-author" id="heroAuthor">— Heartbreak Sweeper</div>
+                </div>
+            </div>
+
+            <div class="hero-buttons">
+                <div style="font-size:13px; color:rgba(255,255,255,0.42); margin-bottom:12px; letter-spacing:0.01em;">🔒 We securely scan only the content you authorize.</div>
+                <button class="hero-cta-btn" id="connectFacebookBtn" onclick="connectFacebook()">Start Your Clean Sweep</button>
+                <button class="btn" onclick="showInstagramInfo()" style="background:linear-gradient(135deg,#1a1a1a,#111); color:#555; font-size:12px; padding:8px 22px; border:1px solid rgba(255,255,255,0.07);">Instagram (Coming Soon)</button>
+            </div>
+            <div class="hero-trust">🔒 100% Private &nbsp;·&nbsp; Powered by AWS AI &nbsp;·&nbsp; You review. You decide.</div>
+            <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-top:14px;">
+                <span style="font-size:12px; color:rgba(255,255,255,0.38); background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); border-radius:20px; padding:5px 14px;">🚫 We never post without permission</span>
+                <span style="font-size:12px; color:rgba(255,255,255,0.38); background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); border-radius:20px; padding:5px 14px;">🔐 Your photos are processed securely</span>
+                <span style="font-size:12px; color:rgba(255,255,255,0.38); background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); border-radius:20px; padding:5px 14px;">💳 No subscriptions. No hidden charges.</span>
+                <span style="font-size:12px; color:rgba(255,255,255,0.38); background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); border-radius:20px; padding:5px 14px;">✋ You remain in control of all actions</span>
+            </div>
+        </div>
+
+        <!-- Step 2: Upload -->
+        <div class="step hidden" id="step2">
+            <h2>Upload Reference Photos</h2>
+            <p style="color: rgba(255,255,255,0.4); margin-bottom: 10px;">For best results, upload <strong style="color:rgba(255,255,255,0.65);">2 clear front-facing photos</strong> of the person you want to find.</p>
+            <input type="file" id="exPhoto" accept="image/*" multiple onchange="handleUpload(event)" style="position:absolute;left:-9999px;">
+            <button onclick="document.getElementById('exPhoto').click()" style="display:block;margin:20px auto;padding:18px 30px;background:rgba(200,30,30,0.08);border-radius:12px;border:2px dashed rgba(200,30,30,0.35);color:rgba(255,255,255,0.6);cursor:pointer;font-size:15px;transition:all 0.3s;" onmouseover="this.style.borderColor='rgba(200,30,30,0.7)';this.style.color='#fff'" onmouseout="this.style.borderColor='rgba(200,30,30,0.35)';this.style.color='rgba(255,255,255,0.6)'">📁 Choose Files</button>
+            <div id="uploadPreview" style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center;"></div>
+            <div id="refPhotoCount" style="text-align:center; color:#aaa; margin-top:8px;"></div>
+            <div style="margin:15px auto; max-width:400px; text-align:center;">
+                <label style="color:#aaa; font-size:14px; display:block; margin-bottom:6px;">Optional: Person's name (finds tagged photos too)</label>
+                <input type="text" id="targetName" placeholder="e.g. Jane Smith" style="width:100%; padding:12px 16px; border-radius:10px; border:1px solid #555; background:#222; color:white; font-size:16px; text-align:center;">
+            </div>
+            <button class="btn hidden" id="scanBtn" onclick="startScan()">🔍 Start AI Scan</button>
+            <div style="margin-top:18px; display:flex; flex-wrap:wrap; gap:8px; justify-content:center;">
+                <span style="font-size:11px; color:rgba(255,255,255,0.32); background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); border-radius:20px; padding:4px 12px;">🔐 Photos processed securely</span>
+                <span style="font-size:11px; color:rgba(255,255,255,0.32); background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); border-radius:20px; padding:4px 12px;">✋ You control all actions</span>
+                <span style="font-size:11px; color:rgba(255,255,255,0.32); background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); border-radius:20px; padding:4px 12px;">🚫 We never post without permission</span>
+            </div>
+        </div>
+
+        <!-- Step 3: Scanning -->
+        <div class="step hidden" id="step3">
+            <div class="scan-heartbeat">💔</div>
+            <h2 id="scanH2">Making room for what's next…</h2>
+            <div id="scanPhrase" style="font-size:14px; color:rgba(255,255,255,0.35); margin:-10px 0 16px; font-style:italic; min-height:20px;"></div>
+            <div class="progress-bar" style="max-width:500px; width:100%;">
+                <div class="progress-fill" id="progressBar"></div>
+            </div>
+            <div id="scanStatus">Initializing AI...</div>
+
+            <!-- Live scan progress counters -->
+            <div id="scanLiveStats" style="margin:24px auto 0; max-width:480px; background:rgba(255,255,255,0.03); border:1px solid rgba(200,30,30,0.15); border-radius:14px; padding:20px 24px;">
+                <div style="display:flex; justify-content:space-around; align-items:center; gap:10px; flex-wrap:wrap; text-align:center;">
+                    <div>
+                        <div id="statScanned" style="font-size:32px; font-weight:700; color:#dc2828; font-family:'Bebas Neue',sans-serif; line-height:1;">—</div>
+                        <div style="font-size:11px; color:rgba(255,255,255,0.4); margin-top:4px; text-transform:uppercase; letter-spacing:0.06em;">Photos Scanned</div>
+                    </div>
+                    <div style="width:1px; height:40px; background:rgba(255,255,255,0.07);"></div>
+                    <div>
+                        <div id="statTotal" style="font-size:32px; font-weight:700; color:rgba(255,255,255,0.5); font-family:'Bebas Neue',sans-serif; line-height:1;">—</div>
+                        <div style="font-size:11px; color:rgba(255,255,255,0.4); margin-top:4px; text-transform:uppercase; letter-spacing:0.06em;">Total Photos</div>
+                    </div>
+                    <div style="width:1px; height:40px; background:rgba(255,255,255,0.07);"></div>
+                    <div>
+                        <div id="statMatches" style="font-size:32px; font-weight:700; color:#4ade80; font-family:'Bebas Neue',sans-serif; line-height:1;">0</div>
+                        <div style="font-size:11px; color:rgba(255,255,255,0.4); margin-top:4px; text-transform:uppercase; letter-spacing:0.06em;">Matches Found</div>
+                    </div>
+                </div>
+                <div id="statETA" style="text-align:center; margin-top:14px; font-size:13px; color:rgba(255,255,255,0.3); min-height:18px;"></div>
+            </div>
+        </div>
+
+        <!-- Step 4: Results -->
+        <div class="step hidden" id="step4">
+            <h2 id="resultsH2">Review Matches</h2>
+            <div id="resultsSub" style="font-size:15px; color:rgba(255,255,255,0.45); margin:-8px 0 18px; text-align:center;"></div>
+            <div class="stats" id="stats"></div>
+            <div id="resultsStatus"></div>
+            <div id="paywallSlot"></div>
+
+            <!-- Extension install prompt (shown only when extension not detected) -->
+            <div id="extPrompt" class="sponsor-banner" style="border-color:rgba(200,30,30,0.3); background:rgba(200,30,30,0.06); margin-bottom:15px;">
+                <div style="font-size:15px; color:#e04040; font-weight:600; margin-bottom:6px;">🧹 Ready to manage these photos?</div>
+                <div style="color:rgba(255,255,255,0.6); font-size:13px; line-height:1.5;">
+                    Install the <strong>Heartbreak Sweeper Chrome Extension</strong> to individually review and remove selected photos from your Facebook history.
+                    <br><br>
+                    <strong style="color:rgba(255,255,255,0.8);">How to install:</strong><br>
+                    1. Download the extension folder<br>
+                    2. Go to <code style="background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px;">chrome://extensions</code> in Chrome<br>
+                    3. Enable <em>Developer mode</em> (top right toggle)<br>
+                    4. Click <em>Load unpacked</em> → select the extension folder<br>
+                    5. Refresh this page — the extension will connect to the app
+                    <br><br>
+                    <button class="btn" onclick="location.reload()" style="background:linear-gradient(135deg,#1a8a1a,#0a5e0a); padding:10px 24px; font-size:13px; margin-top:8px;">🔄 Refresh Page to Detect Extension</button>
+                    <br><span style="font-size:12px; color:rgba(255,255,255,0.35); margin-top:6px; display:inline-block;">Without the extension, you can only download photos.</span>
+                </div>
+            </div>
+            <!-- Extension active badge -->
+            <div id="extActive" class="hidden" style="text-align:center; margin-bottom:12px; padding:8px; background:rgba(0,180,0,0.08); border:1px solid rgba(0,180,0,0.2); border-radius:8px; font-size:13px; color:#4ade80;">
+                ✅ Extension connected — Review and manage matched photos individually
+            </div>
+            <!-- Extension deletion progress (shown during active deletion) -->
+            <div id="extProgress" class="hidden" style="margin-bottom:15px; padding:16px 20px; background:rgba(200,30,30,0.06); border:1px solid rgba(200,30,30,0.2); border-radius:10px; text-align:center;">
+                <div style="font-size:15px; color:#e04040; font-weight:600; margin-bottom:8px;">🧹 Deleting Photos...</div>
+                <div id="extProgressText" style="color:rgba(255,255,255,0.7); font-size:14px; margin-bottom:10px;">Preparing...</div>
+                <div class="progress-bar" style="max-width:400px; margin:0 auto 10px;">
+                    <div class="progress-fill" id="extProgressBar" style="width:0%"></div>
+                </div>
+                <div style="display:flex; gap:20px; justify-content:center; margin-bottom:10px;">
+                    <div style="text-align:center;"><span id="extDoneCount" style="font-size:22px; font-weight:700; color:#4ade80;">0</span><br><span style="font-size:11px; color:rgba(255,255,255,0.4);">DONE</span></div>
+                    <div style="text-align:center;"><span id="extTotalCount" style="font-size:22px; font-weight:700; color:#dc2828;">0</span><br><span style="font-size:11px; color:rgba(255,255,255,0.4);">TOTAL</span></div>
+                    <div style="text-align:center;"><span id="extFailCount" style="font-size:22px; font-weight:700; color:#f59e0b;">0</span><br><span style="font-size:11px; color:rgba(255,255,255,0.4);">FAILED</span></div>
+                </div>
+                <button class="btn" onclick="cancelExtensionDeletion()" style="background:linear-gradient(135deg,#333,#222); padding:8px 20px; font-size:12px;">⛔ Cancel</button>
+            </div>
+
+            <div class="select-hint" id="selectHint">👇 Click photos to select them, then choose an action below</div>
+            <div class="photo-grid" id="resultsGrid"></div>
+            <div class="action-bar" id="actionBar">
+                <button class="btn" onclick="selectAll()" style="background:linear-gradient(135deg,#333,#222);">☑️ Select All</button>
+                <button class="btn" onclick="selectNone()" style="background:linear-gradient(135deg,#333,#222);">☐ Select None</button>
+                <button class="btn" id="deleteOwnBtn" onclick="deleteSelected()" style="background:linear-gradient(135deg,#cc1a1a,#8b0000);">🗑️ Remove Selected (<span id="ownCount">0</span>)</button>
+                <button class="btn" id="untagBtn" onclick="untagSelected()" style="background:linear-gradient(135deg,#b35900,#804000);">🚫 Remove Tags (<span id="tagCount">0</span>)</button>
+                <button class="btn" id="downloadBtn" onclick="downloadSelected()" style="background:linear-gradient(135deg,#1565c0,#0d47a1);">💾 Download Selected (<span id="dlCount">0</span>)</button>
+            </div>
+            <div id="resumeBar" class="hidden" style="margin:20px 0; padding:20px; background:rgba(255,255,255,0.05); border-radius:10px; text-align:center;">
+                <div id="resumeInfo" style="color:#aaa; margin-bottom:12px;"></div>
+                <div style="display:flex; gap:10px; justify-content:center; align-items:center; flex-wrap:wrap;">
+                    <label style="color:#ccc;">From photo</label>
+                    <input id="scanOffset" type="number" min="0" style="width:80px; padding:8px; border-radius:8px; border:1px solid #555; background:#222; color:white; text-align:center;">
+                    <label style="color:#ccc;">to photo</label>
+                    <input id="scanEnd" type="number" min="1" style="width:80px; padding:8px; border-radius:8px; border:1px solid #555; background:#222; color:white; text-align:center;">
+                    <label style="color:#ccc;">of <span id="totalPhotoCount">?</span></label>
+                    <button class="btn" onclick="resumeScan()" style="background:linear-gradient(135deg,#7c3aed,#5b21b6);">🔄 Continue Scan</button>
+                </div>
+            </div>
+            <button class="btn" onclick="scanAgain()" style="background:linear-gradient(135deg,#222,#111); border:1px solid rgba(255,255,255,0.1); margin-top:15px;">New Scan (start over)</button>
+        </div>
+
+        <div id="status"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script>
+        // Configuration
+        const APP_ID = '1354589380018028'; // CORRECT APP ID
+        const BACKEND_URL = 'https://heartbreak-sweep-backend.onrender.com';
+        const STRIPE_PK = 'pk_live_51TK7TJROgduzpwEKfsLK7u7SMhRdzMxBpPDDiqxM2Yakw443xuadTb8Qo5hkBhYYjVwaci8jkum59zuDAAh6qIsM00L5vowa2J';
+        const SESSION_STORAGE_KEY = 'heartbreak_session_id';
+        const PAYMENT_STORAGE_KEY = 'heartbreak_paid';
+        const OAUTH_LOCK_KEY = 'heartbreak_oauth_started_at';
+        const OAUTH_LOCK_TTL_MS = 2 * 60 * 1000;
+
+        let sessionId = null;
+        let selectedPhotos = new Set();
+        let matches = [];
+        let refPhotos = []; // array of data URL strings (max 5)
+        let lastDiagnostics = null; // track scan progress for resume
+        let quoteInterval = null;
+
+        function normalizePhotoId(id) {
+            return String(id);
+        }
+        let extensionInstalled = false;
+        let extensionDeletionPollInterval = null;
+        let extensionDeleting = false;
+        let scanStartTime = 0;
+        let hasPaid = false; // tracks if user has paid for this session
+
+        // Global runtime diagnostics
+        window.addEventListener('error', (event) => {
+            console.error('Runtime error:', event.error || event.message);
+            showStatus('JavaScript error: ' + (event.message || (event.error && event.error.message) || 'Unknown')); 
+        });
+        window.addEventListener('unhandledrejection', (event) => {
+            console.error('Unhandled rejection:', event.reason);
+            showStatus('Unhandled promise rejection: ' + (event.reason?.message || event.reason || 'Unknown'));
+        });
+        window.addEventListener('load', () => {
+            console.log('Heartbreak Sweeper UI loaded');
+        });
+
+        // ─── Extension Detection ──────────────────────────────────────
+        window.addEventListener('message', (event) => {
+            if (event.source !== window) return;
+            const msg = event.data;
+
+            if (msg?.type === 'HEARTBREAK_EXT_INSTALLED') {
+                extensionInstalled = true;
+                console.log('Heartbreak Sweeper extension detected v' + msg.version);
+                updateExtensionUI();
+            }
+
+            if (msg?.type === 'DELETION_PROGRESS') {
+                const completed = msg.completed || 0;
+                const total = msg.total || 0;
+                const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+                const failedSoFar = (msg.results || []).filter(r => !r.success).length || 0;
+
+                // Update progress bar
+                const progressBar = document.getElementById('extProgressBar');
+                const progressText = document.getElementById('extProgressText');
+                if (progressBar) progressBar.style.width = pct + '%';
+                if (progressText) progressText.textContent = `Processing photo ${completed} of ${total}...`;
+                document.getElementById('extDoneCount').textContent = completed - failedSoFar;
+                document.getElementById('extTotalCount').textContent = total;
+                document.getElementById('extFailCount').textContent = failedSoFar;
+
+                showStatus(`🧹 Extension processing: ${completed}/${total} photos (${pct}%)...`);
+                if (msg.lastResult && msg.lastResult.success) {
+                    const normalizedId = normalizePhotoId(msg.lastResult.id);
+                    const card = document.querySelector(`.photo-card[data-photo-id="${normalizedId}"]`);
+                    if (card) card.remove();
+                    selectedPhotos.delete(normalizedId);
+                    matches = matches.filter(m => normalizePhotoId(m.id) !== normalizedId);
+                }
+            }
+
+            if (msg?.type === 'DELETION_COMPLETE') {
+                extensionDeleting = false;
+                if (extensionDeletionPollInterval) {
+                    clearInterval(extensionDeletionPollInterval);
+                    extensionDeletionPollInterval = null;
+                }
+                document.getElementById('extProgress').classList.add('hidden');
+                setActionButtonsEnabled(true);
+                updateActionButtons();
+                const s = msg.succeeded || 0;
+                const f = msg.failed || 0;
+                if (f === 0) {
+                    showStatus(`✅ Successfully processed ${s} photos. They've been removed from your account.`);
+                } else {
+                    showStatus(`Processed ${s} photos, ${f} could not be removed. Some may need manual review.`);
+                }
+            }
+
+            if (msg?.type === 'HEARTBREAK_EXT_ERROR') {
+                extensionDeleting = false;
+                document.getElementById('extProgress').classList.add('hidden');
+                setActionButtonsEnabled(true);
+                showStatus('Extension error: ' + msg.error);
+            }
+        });
+
+        function updateExtensionUI() {
+            const prompt = document.getElementById('extPrompt');
+            const active = document.getElementById('extActive');
+            const deleteBtn = document.getElementById('deleteOwnBtn');
+
+            if (extensionInstalled) {
+                if (prompt) prompt.classList.add('hidden');
+                if (active) active.classList.remove('hidden');
+                if (deleteBtn) deleteBtn.title = 'Extension will individually process each selected photo — you stay in control';
+            } else {
+                if (prompt) prompt.classList.remove('hidden');
+                if (active) active.classList.add('hidden');
+            }
+        }
+
+        // ─── Scan Carousel ────────────────────────────────────────────
+        let scanCarouselInterval = null;
+        let scanCarouselIdx = 0;
+
+        function startScanCarousel() {
+            const slides = document.querySelectorAll('#step3 .scan-slide');
+            if (!slides.length) return;
+            scanCarouselIdx = 0;
+            slides.forEach((s, i) => s.classList.toggle('active', i === 0));
+            if (scanCarouselInterval) clearInterval(scanCarouselInterval);
+            scanCarouselInterval = setInterval(() => {
+                slides[scanCarouselIdx].classList.remove('active');
+                scanCarouselIdx = (scanCarouselIdx + 1) % slides.length;
+                slides[scanCarouselIdx].classList.add('active');
+            }, 4000);
+        }
+
+        function stopScanCarousel() {
+            if (scanCarouselInterval) { clearInterval(scanCarouselInterval); scanCarouselInterval = null; }
+        }
+
+        // ─── Healing Quotes ───────────────────────────────────────────
+        const healingQuotes = [
+            { text: "You're not deleting memories. You're making room for new ones.", author: "Heartbreak Sweeper" },
+            { text: "The bravest thing you can do is let go of someone who was your whole world — and build a new one.", author: "" },
+            { text: "Healing doesn't mean the damage never existed. It means it no longer controls your life.", author: "Akshay Dubey" },
+            { text: "One day you'll look back and realize the heartbreak was the beginning, not the end.", author: "" },
+            { text: "You survived every bad day you've ever had. You're doing better than you think.", author: "" },
+            { text: "Sometimes good things fall apart so better things can come together.", author: "Marilyn Monroe" },
+            { text: "You don't have to move on today. You just have to take one small step forward.", author: "" },
+            { text: "Letting go doesn't mean forgetting. It means you're choosing yourself.", author: "" },
+            { text: "The hottest love has the coldest end. But endings can be beautiful beginnings.", author: "Socrates" },
+            { text: "You were whole before them. You are whole after them.", author: "" },
+            { text: "Grief is the price we pay for love. But you are worth more than your grief.", author: "" },
+            { text: "Your heart is not broken — it's just growing bigger than the space they left.", author: "" },
+            { text: "Every photo you let go of is proof you're choosing your future over your past.", author: "Heartbreak Sweeper" },
+            { text: "It's okay to miss them and still know leaving was right.", author: "" },
+            { text: "Rock bottom became the solid foundation on which I rebuilt my life.", author: "J.K. Rowling" },
+            { text: "The person you're becoming will cost you people, relationships, and comfort — and it's worth it.", author: "" },
+            { text: "You can't start the next chapter if you keep re-reading the last one.", author: "" },
+            { text: "Pain is temporary. Growth is permanent.", author: "" },
+            { text: "Closing this chapter doesn't erase the story. It just means you're ready to write something new.", author: "Heartbreak Sweeper" },
+            { text: "You are allowed to grieve the life you thought you'd have.", author: "" },
+            { text: "Stars can't shine without darkness. Your brightest days are ahead.", author: "" },
+            { text: "Healing is not linear. Some days you'll cry. Some days you'll laugh. Both are progress.", author: "" },
+            { text: "You didn't lose them. You lost someone who didn't appreciate what they had.", author: "" },
+            { text: "The only way out is through. And you're already on your way.", author: "" },
+            { text: "Be patient with yourself. Nothing in nature blooms all year.", author: "" },
+            { text: "What feels like the end is often the beginning of something better than you imagined.", author: "" },
+            { text: "You deserve a love that doesn't make you question your worth.", author: "" },
+            { text: "Today you are one day closer to the love you actually deserve.", author: "" },
+            { text: "Don't cling to a mistake just because you spent a long time making it.", author: "Aubrey de Grey" },
+            { text: "Your value doesn't decrease based on someone's inability to see your worth.", author: "" },
+            { text: "This too shall pass — and when it does, you'll be stronger than before.", author: "" },
+            { text: "Sweeping away the past is an act of self-love, not destruction.", author: "Heartbreak Sweeper" },
+            { text: "Cry if you need to. Then wash your face and keep going.", author: "" },
+            { text: "The relationship ended. Your story didn't.", author: "" },
+            { text: "You're not starting over. You're starting from experience.", author: "" },
+            { text: "Forgiveness isn't about them. It's about freeing yourself.", author: "" },
+            { text: "One year from now, you'll barely recognize the person you are today — in the best way.", author: "" },
+            { text: "Love yourself enough to walk away from what no longer serves you.", author: "" },
+            { text: "Every ending is a chance to find out who you really are without them.", author: "Heartbreak Sweeper" },
+            { text: "You are not what happened to you. You are what you choose to become.", author: "Carl Jung" },
+        ];
+
+        function startQuoteRotation() {
+            stopQuoteRotation();
+            showNextQuote();
+            quoteInterval = setInterval(showNextQuote, 9000);
+        }
+
+        function stopQuoteRotation() {
+            if (quoteInterval) { clearInterval(quoteInterval); quoteInterval = null; }
+        }
+
+        function showNextQuote() {
+            const el = document.getElementById('quoteText') || document.getElementById('heroQuote');
+            const authorEl = document.getElementById('quoteAuthor') || document.getElementById('heroAuthor');
+            if (!el) return;
+
+            // Fade out
+            el.classList.add('fading');
+            if (authorEl) authorEl.classList.add('fading');
+
+            setTimeout(() => {
+                const q = healingQuotes[Math.floor(Math.random() * healingQuotes.length)];
+                el.textContent = `"${q.text}"`;
+                if (authorEl) {
+                    authorEl.textContent = q.author ? `— ${q.author}` : '';
+                    authorEl.classList.remove('fading');
+                }
+                el.classList.remove('fading');
+            }, 800);
+        }
+
+        function setLoginButtonBusy(isBusy) {
+            const button = document.getElementById('connectFacebookBtn');
+            if (!button) return;
+            button.disabled = isBusy;
+            button.textContent = isBusy ? 'Connecting Facebook...' : 'Start Your Clean Sweep';
+        }
+
+        function clearOauthLock() {
+            sessionStorage.removeItem(OAUTH_LOCK_KEY);
+            setLoginButtonBusy(false);
+        }
+
+        function hasActiveOauthLock() {
+            const rawValue = sessionStorage.getItem(OAUTH_LOCK_KEY);
+            if (!rawValue) return false;
+
+            const startedAt = Number(rawValue);
+            if (!Number.isFinite(startedAt) || (Date.now() - startedAt) > OAUTH_LOCK_TTL_MS) {
+                clearOauthLock();
+                return false;
+            }
+
+            return true;
+        }
+
+        function setConnectedState(nextSessionId) {
+            sessionId = nextSessionId;
+
+            if (nextSessionId) {
+                localStorage.setItem(SESSION_STORAGE_KEY, nextSessionId);
+                document.getElementById('step1').classList.add('hidden');
+                document.getElementById('step2').classList.remove('hidden');
+            } else {
+                localStorage.removeItem(SESSION_STORAGE_KEY);
+                document.getElementById('step1').classList.remove('hidden');
+                document.getElementById('step2').classList.add('hidden');
+            }
+        }
+
+        function clearQueryParams() {
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
+        function resetResults() {
+            matches = [];
+            selectedPhotos.clear();
+            lastDiagnostics = null;
+            document.getElementById('resultsGrid').innerHTML = '';
+            document.getElementById('stats').innerHTML = '';
+            document.getElementById('resultsStatus').innerText = '';
+            document.getElementById('resumeBar').classList.add('hidden');
+            updateActionButtons();
+        }
+
+        function handleExpiredSession(message) {
+            setConnectedState(null);
+            resetResults();
+            document.getElementById('step3').classList.add('hidden');
+            document.getElementById('step4').classList.add('hidden');
+            clearOauthLock();
+            showStatus(message || 'Session expired. Reconnect Facebook.');
+        }
+
+        function connectFacebook() {
+            console.debug('connectFacebook() called');
+            if (hasActiveOauthLock()) {
+                showStatus('Facebook login is already in progress. Finish that tab before trying again.');
+                return;
+            }
+
+            sessionStorage.setItem(OAUTH_LOCK_KEY, String(Date.now()));
+            setLoginButtonBusy(true);
+            showStatus('Waking up server before login...');
+
+            // Pre-warm the Render server so the OAuth callback doesn't hit a cold start.
+            // Cap warmup at 8 s so a cold start never blocks the redirect indefinitely.
+            const warmupTimeout = new Promise(resolve => setTimeout(resolve, 8000));
+            const warmUp = fetch(`${BACKEND_URL}/`, { method: 'GET' }).catch(() => {});
+            Promise.race([warmUp, warmupTimeout]).finally(() => {
+                showStatus('Redirecting to Facebook...');
+                const redirectUri = 'https://heartbreak-sweep-backend.onrender.com/auth/callback';
+                const url = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=user_photos&response_type=code`;
+                window.location.href = url;
+            });
+        }
+
+        function showInstagramInfo() {
+            alert('Instagram Business/Creator account required.');
+        }
+
+        window.onload = function() {
+            const params = new URLSearchParams(window.location.search);
+            // Backend sends token, access_token, or fbToken after OAuth redirect
+            const sid = params.get('sessionId')
+                || params.get('token')
+                || params.get('access_token')
+                || params.get('fbToken');
+            const authError = params.get('authError') || params.get('auth_error');
+            const authMessage = params.get('message');
+            const savedSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
+
+            // If this is a fresh page load with no OAuth return params, always clear
+            // any stale lock so the button is never stuck in a disabled state.
+            if (!sid && !authError) {
+                clearOauthLock();
+            } else if (hasActiveOauthLock()) {
+                setLoginButtonBusy(true);
+            } else {
+                setLoginButtonBusy(false);
+            }
+
+            if (authError) {
+                // If we already have a saved session, don't nuke it on code-reuse/expired errors
+                if (savedSessionId && (authError === 'code_used' || authError === 'code_expired')) {
+                    clearOauthLock();
+                    setConnectedState(savedSessionId);
+                    showStatus('Facebook had a hiccup, but your session is still valid. You can scan!');
+                    clearQueryParams();
+                    return;
+                }
+                setConnectedState(null);
+                resetResults();
+                clearOauthLock();
+                showStatus(authMessage || 'Facebook login failed. Reconnect and try again.');
+                clearQueryParams();
+                return;
+            }
+
+            if (sid) {
+                setConnectedState(sid);
+                clearOauthLock();
+                showStatus('Connected! Upload a reference photo.');
+                clearQueryParams();
+                // Check for existing payment after setting session
+                checkExistingPayment();
+                return;
+            }
+
+            if (savedSessionId) {
+                setConnectedState(savedSessionId);
+                clearOauthLock();
+                showStatus('Session restored. Upload a reference photo.');
+                checkExistingPayment();
+            }
+
+            // Handle Stripe payment return
+            checkPaymentReturn();
+        };
+
+        function handleUpload(event) {
+            console.debug('handleUpload', event.target.files.length);
+            const files = Array.from(event.target.files);
+            if (!files.length) return;
+
+            const remaining = 2 - refPhotos.length;
+            const toAdd = files.slice(0, remaining);
+
+            toAdd.forEach(file => {
+                resizeImage(file, 800, function(dataUrl) {
+                    refPhotos.push(dataUrl);
+                    renderRefPreviews();
+                });
+            });
+
+            if (files.length > remaining) {
+                showStatus(`Only ${remaining} more photo(s) allowed (max 2). Extra files were ignored.`);
+            }
+
+            // Reset input so the same file(s) can be re-selected
+            event.target.value = '';
+        }
+
+        function resizeImage(file, maxDim, callback) {
+            const img = new Image();
+            img.onload = function() {
+                let w = img.width, h = img.height;
+                if (w > maxDim || h > maxDim) {
+                    if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+                    else { w = Math.round(w * maxDim / h); h = maxDim; }
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                callback(canvas.toDataURL('image/jpeg', 0.85));
+            };
+            img.src = URL.createObjectURL(file);
+        }
+
+        function removeRefPhoto(index) {
+            refPhotos.splice(index, 1);
+            renderRefPreviews();
+        }
+
+        function renderRefPreviews() {
+            const preview = document.getElementById('uploadPreview');
+            preview.innerHTML = refPhotos.map((src, i) => `
+                <div style="position:relative; display:inline-block;">
+                    <img src="${src}" style="width:120px; height:120px; object-fit:cover; border-radius:10px; border:2px solid rgba(200,30,30,0.5);">
+                    <button onclick="removeRefPhoto(${i})" style="position:absolute; top:-8px; right:-8px; background:#cc1a1a; color:white; border:none; border-radius:50%; width:24px; height:24px; cursor:pointer; font-weight:bold; line-height:24px; padding:0;">✕</button>
+                </div>
+            `).join('');
+
+            document.getElementById('refPhotoCount').textContent =
+                refPhotos.length > 0 ? `${refPhotos.length}/2 reference photo(s) selected` : '';
+
+            const scanBtn = document.getElementById('scanBtn');
+            if (refPhotos.length > 0) {
+                scanBtn.classList.remove('hidden');
+            } else {
+                scanBtn.classList.add('hidden');
+            }
+        }
+
+        async function startScan(options = {}) {
+            console.debug('startScan() called', options);
+            const { offset, limit, isResume } = options;
+
+            if (!sessionId) {
+                showStatus('Reconnect Facebook.');
+                return;
+            }
+
+            if (!refPhotos.length) {
+                showStatus('Upload at least one reference photo.');
+                return;
+            }
+
+            document.getElementById('step2').classList.add('hidden');
+            document.getElementById('step3').classList.remove('hidden');
+            document.getElementById('step4').classList.add('hidden');
+            if (!isResume) resetResults();
+            startQuoteRotation();
+            startScanCarousel();
+
+            // Wake up Render server (free tier sleeps after 15 min)
+            updateProgress(5, 'Waking up server...');
+            try {
+                const wakeUp = await fetch(`${BACKEND_URL}/`, { method: 'GET' });
+                if (!wakeUp.ok) console.warn('Wake-up ping failed:', wakeUp.status);
+            } catch (e) {
+                updateProgress(10, 'Server starting up, please wait...');
+                await new Promise(r => setTimeout(r, 5000));
+                try { await fetch(`${BACKEND_URL}/`, { method: 'GET' }); } catch (e2) {}
+            }
+
+            updateProgress(15, 'Server ready. Starting background scan...');
+            try {
+                const body = {
+                    token: sessionId,
+                    refPhotos: refPhotos
+                };
+                const nameVal = document.getElementById('targetName').value.trim();
+                if (nameVal) body.targetName = nameVal;
+
+                // Start background job
+                const startRes = await fetch(`${BACKEND_URL}/scan/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+
+                const startData = await startRes.json();
+                if (!startRes.ok) {
+                    throw new Error(startData.error || 'Failed to start scan.');
+                }
+
+                const jobId = startData.jobId;
+                scanStartTime = Date.now();
+                updateProgress(20, 'Scan started! Fetching your photos from Facebook...');
+
+                // Poll for status
+                let pollErrors = 0;
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const statusRes = await fetch(`${BACKEND_URL}/scan/status/${jobId}`);
+                        if (!statusRes.ok) {
+                            pollErrors++;
+                            if (pollErrors > 10) {
+                                clearInterval(pollInterval);
+                                throw new Error('Lost connection to scan. Try again.');
+                            }
+                            return;
+                        }
+                        pollErrors = 0;
+                        const job = await statusRes.json();
+
+                        if (job.status === 'running') {
+                            let pct = 20;
+                            const scanned = job.scannedPhotos || 0;
+                            const total = job.totalPhotos || 0;
+                            const matchCount = Array.isArray(job.matches) ? job.matches.length : (job.matchCount || 0);
+                            if (total > 0 && scanned > 0) {
+                                pct = 20 + Math.round((scanned / total) * 75);
+                            } else if (job.phase === 'fetching') {
+                                pct = 18;
+                            }
+                            // Update live stat counters
+                            const elScanned = document.getElementById('statScanned');
+                            const elTotal = document.getElementById('statTotal');
+                            const elMatches = document.getElementById('statMatches');
+                            const elETA = document.getElementById('statETA');
+                            if (elScanned) elScanned.textContent = scanned > 0 ? scanned.toLocaleString() : '—';
+                            if (elTotal) elTotal.textContent = total > 0 ? total.toLocaleString() : '—';
+                            if (elMatches) elMatches.textContent = matchCount;
+                            if (elETA && total > 0 && scanned > 0 && scanStartTime > 0) {
+                                const elapsed = (Date.now() - scanStartTime) / 1000;
+                                const rate = scanned / elapsed;
+                                const secLeft = Math.round((total - scanned) / rate);
+                                if (secLeft > 5) {
+                                    const mins = Math.floor(secLeft / 60);
+                                    const secs = secLeft % 60;
+                                    elETA.textContent = mins > 0 ? `~${mins} min ${secs} sec remaining` : `~${secs} sec remaining`;
+                                } else {
+                                    elETA.textContent = 'Almost done...';
+                                }
+                            }
+                            const scanPhrases = [
+                                'Preparing your next chapter…',
+                                'Making room for what's next…',
+                                'Reviewing memories connected to your past…',
+                                'Scanning your photos one by one…',
+                                'Almost there — nearly done…',
+                            ];
+                            const phraseEl = document.getElementById('scanPhrase');
+                            if (phraseEl && total > 0 && scanned > 0) {
+                                const idx = Math.floor((scanned / total) * (scanPhrases.length - 1));
+                                phraseEl.textContent = scanPhrases[Math.min(idx, scanPhrases.length - 1)];
+                            }
+                            const statusMsg = total > 0 && scanned > 0
+                                ? `Scanning photo ${scanned.toLocaleString()} of ${total.toLocaleString()}`
+                                : (job.message || 'Scanning…');
+                            updateProgress(Math.min(pct, 95), statusMsg);
+                            return; // keep polling
+                        }
+
+                        // Job finished (done or error)
+                        clearInterval(pollInterval);
+
+                        if (job.status === 'error') {
+                            stopQuoteRotation();
+                                    stopScanCarousel();
+                            showStatus(job.error || 'Scan failed.');
+                            return;
+                        }
+
+                        // Success!
+                        matches = Array.isArray(job.matches) ? job.matches : [];
+                        lastDiagnostics = job.diagnostics || null;
+                        updateProgress(100, 'Done!');
+                        showResults(job.message || '');
+                    } catch (pollErr) {
+                        pollErrors++;
+                        if (pollErrors > 10) {
+                            clearInterval(pollInterval);
+                            stopQuoteRotation();
+                            stopScanCarousel();
+                            document.getElementById('step3').classList.add('hidden');
+                            document.getElementById('step2').classList.remove('hidden');
+                            showStatus('Lost connection to scan job. Try again.');
+                        }
+                    }
+                }, 3000);
+
+            } catch (err) {
+                stopQuoteRotation();
+                stopScanCarousel();
+                document.getElementById('step3').classList.add('hidden');
+                document.getElementById('step2').classList.remove('hidden');
+                showStatus(err.message || 'Error starting scan.');
+            }
+        }
+
+        function resumeScan() {
+            // With background jobs, just restart from scratch — server handles everything
+            startScan();
+        }
+
+        function updateProgress(percent, text) {
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.getElementById('scanStatus').innerHTML = `<div class="loading"></div> ${text}`;
+        }
+
+        function showResults(backendMessage) {
+            stopQuoteRotation();
+            stopScanCarousel();
+            document.getElementById('step1').classList.add('hidden');
+            document.getElementById('step2').classList.add('hidden');
+            document.getElementById('step3').classList.add('hidden');
+            document.getElementById('step4').classList.remove('hidden');
+            
+            const grid = document.getElementById('resultsGrid');
+            grid.innerHTML = '';
+            // Clear paywall slot
+            const pwSlot = document.getElementById('paywallSlot');
+            if (pwSlot) pwSlot.innerHTML = '';
+            const likelyMatches = matches.filter(photo => (photo.confidence || 0) > 80).length;
+
+            document.getElementById('stats').innerHTML = `
+                <div class="stat-box"><div class="stat-number">${matches.length}</div><div>Photos Found</div></div>
+                <div class="stat-box"><div class="stat-number">${likelyMatches}</div><div>High Confidence</div></div>
+                <div class="stat-box"><div class="stat-number">${selectedPhotos.size}</div><div>Selected</div></div>
+            `;
+
+            if (!matches.length) {
+                document.getElementById('resultsStatus').innerText =
+                    backendMessage || 'No photos found for review.';
+                const h2el = document.getElementById('resultsH2');
+                if (h2el) h2el.textContent = 'No matches found.';
+                const subEl = document.getElementById('resultsSub');
+                if (subEl) subEl.textContent = '';
+                document.getElementById('selectHint').classList.add('hidden');
+                document.getElementById('actionBar').classList.add('hidden');
+                return;
+            }
+
+            document.getElementById('selectHint').classList.remove('hidden');
+            document.getElementById('actionBar').classList.remove('hidden');
+            document.getElementById('resultsStatus').innerText = '';
+            // Emotional results headline
+            const h2el = document.getElementById('resultsH2');
+            const subEl = document.getElementById('resultsSub');
+            if (h2el) h2el.textContent = `We found ${matches.length} photo${matches.length === 1 ? '' : 's'} connected to this person.`;
+            if (subEl) subEl.textContent = 'Review and decide what belongs in your future.';
+            showStatus('');
+            updateExtensionUI();
+            updatePaymentUI();
+
+            matches.forEach((photo, index) => {
+                const id = normalizePhotoId(photo.id ?? index + 1);
+                const isMatch = (photo.confidence || 0) > 80;
+                const isTagMatch = photo.matchType === 'tag';
+                const card = document.createElement('div');
+                card.className = `photo-card ${isMatch ? 'match' : ''} ${isTagMatch ? 'match' : ''} ${selectedPhotos.has(id) ? 'selected' : ''}`;
+                card.dataset.photoId = id;
+                card.dataset.owned = photo.owned ? 'true' : 'false';
+                const typeLabel = photo.owned ? 'Your upload' : 'Tagged';
+                const badgeText = isTagMatch ? 'NAME' : ((photo.confidence || 0) > 0 ? `${photo.confidence}%` : '');
+                const badgeStyle = isTagMatch ? 'background:#8b5cf6;' : '';
+                card.innerHTML = `
+                    <img src="${photo.url}" onclick="toggleSelection('${id}', this)">
+                    <div class="check-overlay">✓</div>
+                    <div class="type-badge">${typeLabel}</div>
+                    ${badgeText ? `<div class="match-badge" style="${badgeStyle}">${badgeText}</div>` : ''}
+                `;
+                grid.appendChild(card);
+            });
+
+            updateActionButtons();
+
+            // Show resume bar if scan didn't finish all photos
+            const resumeBar = document.getElementById('resumeBar');
+            if (lastDiagnostics && lastDiagnostics.totalPhotos) {
+                const total = lastDiagnostics.totalPhotos;
+                const scanned = (lastDiagnostics.scannedPhotos || 0) + (lastDiagnostics.skippedPhotos || 0);
+                const remaining = total - scanned;
+
+                if (remaining > 0) {
+                    document.getElementById('resumeInfo').textContent =
+                        `Scanned ${scanned} of ${total} photos. ${remaining} photos remaining.`;
+                    document.getElementById('scanOffset').value = scanned;
+                    document.getElementById('scanEnd').value = total;
+                    document.getElementById('totalPhotoCount').textContent = total;
+                    resumeBar.classList.remove('hidden');
+                } else {
+                    document.getElementById('resumeInfo').textContent =
+                        `Scanned all ${total} photos. Found ${matches.length} match(es).`;
+                    resumeBar.classList.add('hidden');
+                }
+            } else {
+                resumeBar.classList.add('hidden');
+            }
+        }
+
+        function toggleSelection(id, element) {
+            id = normalizePhotoId(id);
+            const card = element.parentElement;
+            if (selectedPhotos.has(id)) {
+                selectedPhotos.delete(id);
+                card.classList.remove('selected');
+            } else {
+                selectedPhotos.add(id);
+                card.classList.add('selected');
+            }
+            updateActionButtons();
+        }
+
+        function selectAll() {
+            matches.forEach((photo, index) => {
+                const id = normalizePhotoId(photo.id ?? index + 1);
+                selectedPhotos.add(id);
+                const card = document.querySelector(`.photo-card[data-photo-id="${id}"]`);
+                if (card) card.classList.add('selected');
+            });
+            updateActionButtons();
+        }
+
+        function selectNone() {
+            selectedPhotos.clear();
+            document.querySelectorAll('.photo-card.selected').forEach(c => c.classList.remove('selected'));
+            updateActionButtons();
+        }
+
+        function scanAgain() {
+            document.getElementById('step4').classList.add('hidden');
+            document.getElementById('step2').classList.remove('hidden');
+            resetResults();
+            showStatus('Upload reference photos and scan again.');
+        }
+
+        function updateActionButtons() {
+            const count = selectedPhotos.size;
+            let ownCount = 0;
+            let tagCount = 0;
+            selectedPhotos.forEach(id => {
+                const card = document.querySelector(`.photo-card[data-photo-id="${id}"]`);
+                if (card && card.dataset.owned === 'true') ownCount++;
+                else tagCount++;
+            });
+            document.getElementById('ownCount').textContent = ownCount;
+            document.getElementById('tagCount').textContent = tagCount;
+            document.getElementById('dlCount').textContent = count;
+
+            if (document.getElementById('step4').classList.contains('hidden')) return;
+
+            const statsNode = document.getElementById('stats');
+            const likelyMatches = matches.filter(photo => (photo.confidence || 0) > 80).length;
+            statsNode.innerHTML = `
+                <div class="stat-box"><div class="stat-number">${matches.length}</div><div>Photos Found</div></div>
+                <div class="stat-box"><div class="stat-number">${likelyMatches}</div><div>High Confidence</div></div>
+                <div class="stat-box"><div class="stat-number">${count}</div><div>Selected</div></div>
+            `;
+        }
+
+        // Ping the extension and wait briefly for a response
+        function recheckExtension() {
+            return new Promise(resolve => {
+                if (extensionInstalled) { resolve(true); return; }
+                window.postMessage({ type: 'HEARTBREAK_PING_EXT' }, '*');
+                const timeout = setTimeout(() => resolve(false), 1500);
+                const handler = (event) => {
+                    if (event.source === window && event.data?.type === 'HEARTBREAK_EXT_INSTALLED') {
+                        clearTimeout(timeout);
+                        window.removeEventListener('message', handler);
+                        extensionInstalled = true;
+                        updateExtensionUI();
+                        resolve(true);
+                    }
+                };
+                window.addEventListener('message', handler);
+            });
+        }
+
+        async function deleteSelected() {
+            // Payment gate
+            if (!hasPaid) { await promptPayment(); return; }
+
+            const idsToDelete = [];
+            selectedPhotos.forEach(id => {
+                const normalizedId = normalizePhotoId(id);
+                const card = document.querySelector(`.photo-card[data-photo-id="${normalizedId}"]`);
+                if (card && card.dataset.owned === 'true') {
+                    idsToDelete.push({ id: normalizedId, owned: true });
+                }
+            });
+            if (!idsToDelete.length) {
+                showStatus('No owned photos selected. Use "Remove Tags" for photos others uploaded.');
+                return;
+            }
+            if (!confirm(`Remove ${idsToDelete.length} of your photos from Facebook? This action cannot be undone.`)) return;
+
+            // Remind user to download first
+            const hasUndownloaded = idsToDelete.length > 0;
+            if (hasUndownloaded && !confirm('Have you downloaded any photos you want to keep? Press OK to continue, or Cancel to go back and download first.')) return;
+
+            // Re-check for extension right before acting
+            const extReady = await recheckExtension();
+            if (extReady) {
+                await doExtensionRemoval(idsToDelete);
+            } else {
+                showStatus('⚠️ Extension not detected. Please refresh this page after installing the extension, then try again.');
+            }
+        }
+
+        async function untagSelected() {
+            // Payment gate
+            if (!hasPaid) { await promptPayment(); return; }
+
+            const idsToUntag = [];
+            selectedPhotos.forEach(id => {
+                const normalizedId = normalizePhotoId(id);
+                const card = document.querySelector(`.photo-card[data-photo-id="${normalizedId}"]`);
+                if (card && card.dataset.owned === 'false') {
+                    idsToUntag.push({ id: normalizedId, owned: false });
+                }
+            });
+            if (!idsToUntag.length) {
+                showStatus('No tagged photos selected. Use "Remove Selected" for your uploads.');
+                return;
+            }
+            if (!confirm(`Remove your tag from ${idsToUntag.length} photos? They\'ll no longer appear on your profile.`)) return;
+
+            const extReady = await recheckExtension();
+            if (extReady) {
+                await doExtensionRemoval(idsToUntag);
+            } else {
+                showStatus('⚠️ Extension not detected. Please refresh this page after installing the extension, then try again.');
+            }
+        }
+
+        function setActionButtonsEnabled(enabled) {
+            document.querySelectorAll('#actionBar .btn').forEach(btn => {
+                btn.disabled = !enabled;
+                btn.style.opacity = enabled ? '1' : '0.4';
+                btn.style.pointerEvents = enabled ? 'auto' : 'none';
+            });
+        }
+
+        function cancelExtensionDeletion() {
+            window.postMessage({ type: 'HEARTBREAK_CANCEL' }, '*');
+            extensionDeleting = false;
+            document.getElementById('extProgress').classList.add('hidden');
+            setActionButtonsEnabled(true);
+            showStatus('Deletion cancelled.');
+        }
+
+        // Extension-based deletion (opens photos in background tab, clicks delete)
+        async function doExtensionRemoval(items) {
+            extensionDeleting = true;
+            setActionButtonsEnabled(false);
+
+            // Show progress UI
+            const progressPanel = document.getElementById('extProgress');
+            progressPanel.classList.remove('hidden');
+            document.getElementById('extProgressText').textContent = `Sending ${items.length} photos to extension...`;
+            document.getElementById('extProgressBar').style.width = '0%';
+            document.getElementById('extDoneCount').textContent = '0';
+            document.getElementById('extTotalCount').textContent = items.length;
+            document.getElementById('extFailCount').textContent = '0';
+
+            showStatus(`🧹 Sending ${items.length} photos to extension for review and removal...`);
+            window.postMessage({
+                type: 'HEARTBREAK_DELETE_PHOTOS',
+                photos: items,
+            }, '*');
+        }
+
+        // API-based deletion (fallback when extension not installed)
+        async function doApiRemoval(items, actionLabel) {
+            showStatus(`Processing ${items.length} photos...`);
+            try {
+                const res = await fetch(`${BACKEND_URL}/delete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: sessionId, ids: items })
+                });
+
+                const data = await res.json();
+                const results = Array.isArray(data.deleted) ? data.deleted : [];
+                const successIds = results.filter(r => r.success).map(r => r.id);
+                const failed = results.filter(r => !r.success);
+
+                if (res.status === 401) {
+                    handleExpiredSession(data.error);
+                    return;
+                }
+
+                successIds.forEach(id => {
+                    const card = document.querySelector(`.photo-card[data-photo-id="${id}"]`);
+                    if (card) card.remove();
+                    selectedPhotos.delete(id);
+                });
+
+                matches = matches.filter(photo => !successIds.includes(normalizePhotoId(photo.id)));
+                updateActionButtons();
+
+                if (failed.length) {
+                    const reasons = data.summary?.errorReasons || [];
+                    const reasonText = reasons.length ? ' Facebook says: ' + reasons.join('; ') : '';
+                    const hint = reasons.some(r => r.includes('created by the same app') || r.includes('capability'))
+                        ? ' Install the Heartbreak Sweeper Chrome extension to review and manage photos directly!'
+                        : '';
+                    showStatus(`${successIds.length} ${actionLabel}, ${failed.length} failed.${reasonText}${hint}`);
+                } else {
+                    showStatus(`Successfully ${actionLabel} ${successIds.length} photos!`);
+                }
+            } catch (err) {
+                showStatus(err.message || 'Error during removal.');
+            }
+        }
+
+        async function downloadSelected() {
+            // Payment gate
+            if (!hasPaid) { await promptPayment(); return; }
+
+            const selected = matches.filter(m => selectedPhotos.has(normalizePhotoId(m.id)));
+            if (!selected.length) {
+                showStatus('No photos selected to download.');
+                return;
+            }
+
+            showStatus(`📦 Packaging ${selected.length} photo(s) into a ZIP file...`);
+
+            try {
+                const zip = new JSZip();
+                const folder = zip.folder('heartbreak_sweep_photos');
+                let fetched = 0;
+
+                for (const photo of selected) {
+                    try {
+                        const resp = await fetch(photo.url);
+                        const blob = await resp.blob();
+                        folder.file(`photo_${photo.id}.jpg`, blob);
+                        fetched++;
+                        if (fetched % 5 === 0 || fetched === selected.length) {
+                            showStatus(`📦 Packaging photos: ${fetched}/${selected.length}...`);
+                        }
+                    } catch (e) {
+                        console.warn(`Failed to fetch photo ${photo.id}:`, e.message);
+                    }
+                }
+
+                if (fetched === 0) {
+                    showStatus('Could not download any photos. They may have expired — try a new scan.');
+                    return;
+                }
+
+                showStatus(`📦 Compressing ${fetched} photos...`);
+                const zipBlob = await zip.generateAsync({ type: 'blob' }, (meta) => {
+                    if (meta.percent) {
+                        showStatus(`📦 Compressing: ${Math.round(meta.percent)}%...`);
+                    }
+                });
+
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(zipBlob);
+                a.download = 'heartbreak_sweep_photos.zip';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(a.href);
+
+                showStatus(`✅ Downloaded ${fetched} photos as heartbreak_sweep_photos.zip — check your Downloads folder.`);
+            } catch (err) {
+                showStatus('Error creating ZIP: ' + (err.message || 'Unknown error'));
+            }
+        }
+
+        function showStatus(msg) {
+            document.getElementById('status').innerText = msg;
+        }
+
+        // ─── Stripe Payment ───────────────────────────────────────────
+
+        async function promptPayment() {
+            showStatus('');
+            // Show reassurance overlay before redirecting
+            const slot = document.getElementById('paywallSlot');
+            const existing = document.getElementById('paywallBanner');
+            if (existing) {
+                existing.insertAdjacentHTML('beforeend', `
+                    <div id="payReassurance" style="margin-top:14px; padding:14px 18px; background:rgba(255,255,255,0.04); border-radius:8px; border:1px solid rgba(255,255,255,0.08); text-align:left; display:inline-block; min-width:260px;">
+                        <div style="font-size:13px; color:rgba(255,255,255,0.55); line-height:1.9;">
+                            \u2705 Secure checkout &nbsp;&nbsp; \u2705 One-time charge<br>
+                            \u2705 No subscription &nbsp;&nbsp;&nbsp; \u2705 Securely processed by Stripe
+                        </div>
+                        <div style="font-size:13px; color:rgba(255,255,255,0.35); margin-top:8px;">Redirecting to Stripe...</div>
+                    </div>
+                `);
+            }
+            try {
+                const res = await fetch(`${BACKEND_URL}/create-checkout-session`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionId: sessionId,
+                        returnUrl: window.location.origin + window.location.pathname,
+                    }),
+                });
+                const data = await res.json();
+
+                if (data.alreadyPaid) {
+                    hasPaid = true;
+                    localStorage.setItem(PAYMENT_STORAGE_KEY, sessionId);
+                    showStatus('Payment already on file! You can now manage and download photos.');
+                    updatePaymentUI();
+                    return;
+                }
+
+                if (data.url) {
+                    // Save current state before redirecting
+                    sessionStorage.setItem('heartbreak_matches', JSON.stringify(matches));
+                    sessionStorage.setItem('heartbreak_selected', JSON.stringify([...selectedPhotos]));
+                    sessionStorage.setItem('heartbreak_diagnostics', JSON.stringify(lastDiagnostics));
+                    window.location.href = data.url;
+                } else {
+                    showStatus('Could not open payment page: ' + (data.error || 'Unknown error. Try again.'));
+                }
+            } catch (err) {
+                showStatus('Payment error: ' + (err.message || 'Try again.'));
+            }
+        }
+
+        async function checkPaymentReturn() {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('payment') === 'success' && params.get('sid')) {
+                const sid = params.get('sid');
+                hasPaid = true;
+                localStorage.setItem(PAYMENT_STORAGE_KEY, sid);
+                showStatus('\u2705 Payment successful! You can now manage and download your photos.');
+
+                // Restore scan state
+                const savedMatches = sessionStorage.getItem('heartbreak_matches');
+                const savedSelected = sessionStorage.getItem('heartbreak_selected');
+                const savedDiag = sessionStorage.getItem('heartbreak_diagnostics');
+                if (savedMatches) {
+                    matches = JSON.parse(savedMatches);
+                    if (savedSelected) {
+                        selectedPhotos = new Set(JSON.parse(savedSelected));
+                    }
+                    if (savedDiag) {
+                        lastDiagnostics = JSON.parse(savedDiag);
+                    }
+                    showResults('Payment confirmed! Select photos to manage, download, or archive.');
+                }
+
+                // Clean up URL
+                window.history.replaceState({}, document.title, window.location.pathname);
+                updatePaymentUI();
+            }
+
+            if (params.get('payment') === 'cancelled') {
+                showStatus('Payment cancelled. You can still review your matches — pay when you\'re ready to manage or download.');
+                // Restore scan state
+                const savedMatches = sessionStorage.getItem('heartbreak_matches');
+                const savedSelected = sessionStorage.getItem('heartbreak_selected');
+                const savedDiag = sessionStorage.getItem('heartbreak_diagnostics');
+                if (savedMatches) {
+                    matches = JSON.parse(savedMatches);
+                    if (savedSelected) {
+                        selectedPhotos = new Set(JSON.parse(savedSelected));
+                    }
+                    if (savedDiag) {
+                        lastDiagnostics = JSON.parse(savedDiag);
+                    }
+                    showResults('');
+                }
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+        }
+
+        function checkExistingPayment() {
+            const paidSession = localStorage.getItem(PAYMENT_STORAGE_KEY);
+            if (paidSession && paidSession === sessionId) {
+                hasPaid = true;
+                updatePaymentUI();
+            }
+        }
+
+        function updatePaymentUI() {
+            const slot = document.getElementById('paywallSlot');
+            const actionBar = document.getElementById('actionBar');
+            if (!actionBar) return;
+
+            // Remove existing paywall banner if any
+            const existing = document.getElementById('paywallBanner');
+            if (existing) existing.remove();
+
+            const deleteBtn = document.getElementById('deleteOwnBtn');
+            const untagBtn = document.getElementById('untagBtn');
+            const dlBtn = document.getElementById('downloadBtn');
+
+            if (!hasPaid && matches.length > 0) {
+                // Insert paywall banner HIGH — in the slot right after stats/heading
+                const banner = document.createElement('div');
+                banner.id = 'paywallBanner';
+                banner.style.cssText = 'margin:0 0 20px; padding:20px 24px; background:linear-gradient(135deg, rgba(200,30,30,0.12), rgba(200,30,30,0.06)); border:2px solid rgba(200,30,30,0.5); border-radius:12px; text-align:center;';
+                banner.innerHTML = `
+                    <div style="font-size:22px; color:#e04040; font-weight:700; margin-bottom:6px; font-family:'Bebas Neue',sans-serif; letter-spacing:0.03em;">\ud83d\udd13 Unlock &amp; Take Control</div>
+                    <div style="color:rgba(255,255,255,0.65); font-size:14px; margin-bottom:14px;">We found <strong style="color:#fff;">${matches.length} photo${matches.length === 1 ? '' : 's'}</strong> connected to this person.<br>Unlock to remove, organize, and download a backup archive.</div>
+                    <button class="btn" onclick="promptPayment()" style="background:linear-gradient(135deg,#cc1a1a,#8b0000); font-size:17px; padding:15px 44px; letter-spacing:0.01em;">\ud83d\udd13 Unlock &amp; Take Control &mdash; $4.99</button>
+                    <div style="font-size:12px; color:rgba(255,255,255,0.32); margin-top:10px;">One-time payment &nbsp;\u2022&nbsp; Up to 1,500 photos</div>
+                `;
+                if (slot) {
+                    slot.appendChild(banner);
+                } else {
+                    actionBar.parentNode.insertBefore(banner, actionBar);
+                }
+
+                // Lock action buttons visually (still clickable — triggers payment gate)
+                [deleteBtn, untagBtn, dlBtn].forEach(btn => {
+                    if (!btn) return;
+                    btn.style.opacity = '0.45';
+                    btn.style.filter = 'grayscale(0.4)';
+                    btn.style.position = 'relative';
+                    if (!btn.querySelector('.lock-icon')) {
+                        const lock = document.createElement('span');
+                        lock.className = 'lock-icon';
+                        lock.textContent = ' 🔒';
+                        lock.style.cssText = 'font-size:12px; vertical-align:middle;';
+                        btn.appendChild(lock);
+                    }
+                });
+            } else {
+                // Unlock buttons
+                [deleteBtn, untagBtn, dlBtn].forEach(btn => {
+                    if (!btn) return;
+                    btn.style.opacity = '';
+                    btn.style.filter = '';
+                    const lock = btn.querySelector('.lock-icon');
+                    if (lock) lock.remove();
+                });
+            }
+        }
+
+        // Landing page quote rotation
+        const heroQuotes = [
+            { text: "You're not deleting memories. You're making room for new ones.", author: "Heartbreak Sweeper" },
+            { text: "We look, so you don't have to.", author: "Heartbreak Sweeper" },
+            { text: "Letting go doesn't mean forgetting. It means you're choosing yourself.", author: "" },
+            { text: "You don't have to scroll through every photo and relive it. We handle that.", author: "Heartbreak Sweeper" },
+            { text: "Healing starts with one small step. This is yours.", author: "" },
+            { text: "You were whole before them. You are whole after them.", author: "" },
+            { text: "Out of sight, out of mind — that's the point.", author: "Heartbreak Sweeper" },
+            { text: "The bravest thing you can do is let go of someone who was your whole world.", author: "" },
+            { text: "Every photo you let go of is proof you're choosing your future.", author: "Heartbreak Sweeper" },
+            { text: "You deserve a fresh start. We're here to help you get one.", author: "Heartbreak Sweeper" },
+            { text: "Sometimes good things fall apart so better things can come together.", author: "Marilyn Monroe" },
+            { text: "Your phone shouldn't be a minefield of memories.", author: "Heartbreak Sweeper" },
+            { text: "You can't start the next chapter if you keep re-reading the last one.", author: "" },
+            { text: "Sweeping away the past is an act of self-love, not destruction.", author: "Heartbreak Sweeper" },
+            { text: "One year from now, you'll barely recognize the person you are today — in the best way.", author: "" },
+        ];
+        let heroQuoteInterval = null;
+
+        function startHeroQuotes() {
+            showNextHeroQuote();
+            heroQuoteInterval = setInterval(showNextHeroQuote, 7000);
+        }
+
+        function showNextHeroQuote() {
+            const el = document.getElementById('heroQuote');
+            const authorEl = document.getElementById('heroAuthor');
+            if (!el) return;
+
+            el.classList.add('fading');
+            if (authorEl) authorEl.classList.add('fading');
+
+            setTimeout(() => {
+                const q = heroQuotes[Math.floor(Math.random() * heroQuotes.length)];
+                el.textContent = `"${q.text}"`;
+                if (authorEl) {
+                    authorEl.textContent = q.author ? `— ${q.author}` : '';
+                    authorEl.classList.remove('fading');
+                }
+                el.classList.remove('fading');
+            }, 800);
+        }
+
+        // Start hero quotes on page load (only if step1 is visible)
+        if (!document.getElementById('step1').classList.contains('hidden')) {
+            startHeroQuotes();
+        }
+
+        // Floating hearts background effect
+        (function createFloatingHearts() {
+            const container = document.getElementById('heartsBg');
+            if (!container) return;
+            const hearts = ['♥', '♡', '💔'];
+            for (let i = 0; i < 15; i++) {
+                const span = document.createElement('span');
+                span.className = 'heart';
+                span.textContent = hearts[Math.floor(Math.random() * hearts.length)];
+                span.style.left = Math.random() * 100 + '%';
+                span.style.fontSize = (8 + Math.random() * 16) + 'px';
+                span.style.animationDuration = (12 + Math.random() * 20) + 's';
+                span.style.animationDelay = (Math.random() * 15) + 's';
+                container.appendChild(span);
+            }
+        })();
+    </script>
 </body>
 </html>
+
