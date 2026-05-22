@@ -171,6 +171,23 @@ app.get('/auth/facebook/callback', async (req, res) => {
   res.json({ status: 'Callback received', code });
 });
 
+// Facebook OAuth start endpoint used by frontend
+app.get('/auth/facebook/start', (req, res) => {
+  const clientId = process.env.FB_APP_ID;
+  const frontendUrl = process.env.FRONTEND_UNIVERSAL_URL || process.env.FRONTEND_URL || 'https://heartbreaksweeper.com';
+  const redirectUri = process.env.FB_REDIRECT_URI || `${req.protocol}://${req.get('host')}/auth/callback`;
+
+  if (!clientId) {
+    return res.redirect(`${frontendUrl}?authError=facebook_not_configured&message=Facebook+OAuth+not+set+up+on+server`);
+  }
+
+  const state = encodeURIComponent(req.query.state || '');
+  const scope = encodeURIComponent('email,public_profile,user_photos,user_posts,user_tagged_places');
+  const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}&state=${state}`;
+
+  res.redirect(authUrl);
+});
+
 // Generic auth callback endpoint used by frontend
 app.get('/auth/callback', async (req, res) => {
   res.set({
@@ -223,7 +240,7 @@ app.get('/auth/callback', async (req, res) => {
     }
   }
 
-  const oauthEnv = ['FB_APP_ID', 'FB_APP_SECRET', 'FB_REDIRECT_URI'];
+  const oauthEnv = ['FB_APP_ID', 'FB_APP_SECRET'];
   const missingOauthEnv = oauthEnv.filter((key) => !process.env[key]);
   if (missingOauthEnv.length) {
     return res.status(500).json({
